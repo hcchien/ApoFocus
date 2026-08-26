@@ -3,6 +3,7 @@ module github.com/hcchien/apofocus
 go 1.26
 
 require (
+	github.com/fsnotify/fsnotify v1.10.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd

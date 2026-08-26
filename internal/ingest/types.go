@@ -74,11 +74,15 @@ type ExistingPhoto struct {
 
 type PhotoRecord struct {
 	Inspection
-	Path          string
-	ThumbnailPath string
-	ImageURL      string
-	ThumbnailURL  string
-	Tags          []string
+	Path                  string
+	ThumbnailPath         string
+	RelativePath          string
+	ThumbnailRelativePath string
+	FileID                string
+	ThumbnailFileID       string
+	ImageURL              string
+	ThumbnailURL          string
+	Tags                  []string
 }
 
 type Repository interface {

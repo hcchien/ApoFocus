@@ -20,6 +20,8 @@ ApoFocus 是為職業攝影師設計的照片、影片與音訊索引網站。Go
 - Finder 式虛擬資料夾：照片依年份、專題、Tags、相機與鏡頭；影片／音訊另可依 Codec 瀏覽
 - 手動 Collections 與保存 filter JSON 的智慧資料夾
 - 外接硬碟／整個 Volume 批次整理、SSE 即時進度、逐張錯誤與中止功能
+- Managed library filesystem watcher：檔案改名或在 library 內搬動時，自動修正 DB path；遺失與磁碟離線狀態會顯示在 UI
+- macOS 0-to-1 installer：Homebrew dependencies、專用 PostgreSQL/pgvector、Python models、Go binaries 與 LaunchAgents
 
 ## 系統邊界
 
@@ -33,6 +35,65 @@ Browser ──HTTP──> Go Web API ──SQL──> PostgreSQL + pgvector
 ```
 
 `photos` 與 `media_assets` 的 `path`／`thumbnail_path` 保存伺服器或 NAS 上的實際路徑，只供後端、MCP server 與向量 worker 使用。瀏覽器只取得 `image_url`／`media_url` 與 `thumbnail_url`；API 不輸出本機 path，保存的 ffprobe metadata 也會移除來源 filename，避免洩漏儲存拓撲。
+
+## macOS 從零安裝
+
+在 repository 目錄執行一個 script 即可：
+
+```bash
+bash scripts/install_macos.sh
+```
+
+Installer 可重複執行，會完成：
+
+1. 檢查 Xcode Command Line Tools；若尚未安裝，開啟 macOS 官方安裝流程並提示完成後重跑。
+2. 安裝 Homebrew（若需要），以及 Go、Python 3.12、PostgreSQL 18、pgvector、FFmpeg、LibRaw、libsndfile 與模型編譯依賴。
+3. 在 `~/Library/Application Support/ApoFocus` 建立獨立 PostgreSQL cluster、隨機本機密碼、Python venv、model cache 與 Go binaries，不會使用或修改既有 PostgreSQL database。
+4. 依目前 schema 狀態安全套用尚未安裝的 migrations。
+5. 預先下載並載入驗證 OpenCLIP、Whisper base 與 LAION-CLAP。
+6. 安裝 `com.apofocus.postgres`、`com.apofocus.embedding`、`com.apofocus.web` 三個 LaunchAgents，登入後自動啟動並在失敗時重啟。
+7. 驗證 PostgreSQL/pgvector、embedding health endpoint 與 Web API。
+
+預設位置：
+
+| 項目 | 路徑 |
+|---|---|
+| Managed library | `~/Pictures/ApoFocus Library` |
+| MCP / batch inbox | `~/Pictures/ApoFocus Inbox` |
+| App、DB、venv、models | `~/Library/Application Support/ApoFocus` |
+| Logs | `~/Library/Logs/ApoFocus` |
+| MCP client 設定範本 | `~/Library/Application Support/ApoFocus/mcp-server.json` |
+| Web | `http://127.0.0.1:8080` |
+
+若 library 要直接放在已掛載的外接硬碟：
+
+```bash
+bash scripts/install_macos.sh \
+  --library-root "/Volumes/PHOTO_DISK/ApoFocus Library"
+```
+
+其他常用選項：
+
+```bash
+bash scripts/install_macos.sh --check-only
+bash scripts/install_macos.sh --skip-model-download
+bash scripts/install_macos.sh --no-start
+bash scripts/install_macos.sh --postgres-port 55433
+```
+
+完整安裝需要下載數 GB 的 Python packages 與模型。Script 僅讓 Web 監聽 `127.0.0.1`；目前系統沒有遠端登入驗證，因此 installer 不接受 public listen address。
+
+安裝後可用控制工具：
+
+```bash
+"$HOME/Library/Application Support/ApoFocus/bin/apofocusctl" doctor
+"$HOME/Library/Application Support/ApoFocus/bin/apofocusctl" status
+"$HOME/Library/Application Support/ApoFocus/bin/apofocusctl" restart
+"$HOME/Library/Application Support/ApoFocus/bin/apofocusctl" logs
+"$HOME/Library/Application Support/ApoFocus/bin/apofocusctl" open
+```
+
+外接硬碟、`Pictures` 或其他受保護資料夾第一次讀取時，macOS 可能要求 Files and Folders 權限。若 LaunchAgent 被拒絕，請到 System Settings → Privacy & Security 授權，再執行 `apofocusctl restart`。
 
 ## 先看介面（不需要資料庫）
 
@@ -61,8 +122,11 @@ make run
 
 | 欄位 | 用途 |
 |---|---|
-| `path` | 原始照片的絕對路徑或儲存系統 canonical path，唯一且不對前端公開 |
+| `path` | 原始照片的目前絕對路徑或儲存系統 canonical path，唯一且不對前端公開 |
 | `thumbnail_path` | 本機縮圖路徑，可為空 |
+| `storage_root_id` / `relative_path` | 指向 managed library root，並保存可隨掛載點重建的相對路徑 |
+| `file_id` / `thumbnail_file_id` | filesystem device + inode 識別碼，用於在 rename/move event 後辨識同一檔案 |
+| `availability_status` / `thumbnail_status` | `available`、`missing`、`volume_offline` 或 `unknown` |
 | `image_url` / `thumbnail_url` | 可交付瀏覽器的 URL，建議是短效簽名 URL 或 Go 的受權限保護 route |
 | `metadata jsonb` | 未提升為常用欄位的 EXIF、IPTC、XMP 等延伸資訊 |
 | `embedding vector(512)` | 經 L2 normalization 的 OpenCLIP 影像向量 |
@@ -167,6 +231,17 @@ Batch API：
 - `GET /api/v1/batch-jobs/{id}/items`
 - `GET /api/v1/batch-jobs/{id}/events` — SSE
 - `POST /api/v1/batch-jobs/{id}/cancel`
+
+## 檔案搬移與 filesystem events
+
+設定 `DATABASE_URL` 與 `PHOTO_LIBRARY_ROOT` 後，Web app 與 MCP server 會把這個路徑登記在 `storage_roots`，啟動時確認 DB 已知的原檔、縮圖與 keyframe，接著遞迴監聽 library 內的 filesystem events。
+
+- 檔案在同一個 filesystem 內改名或搬到 library 的其他資料夾時，device + inode 不變；watcher 會用 `file_id` 找到原資料並更新 `path`、`relative_path` 與瀏覽器 URL。
+- 刪除或移出 library 時，不刪 DB row，而是標成 `missing`；外接硬碟拔除時整個 root 標成 `volume_offline`。若 app 持續執行，重新掛載後會自動恢復監聽並核對已知路徑。
+- 新的匯入在寫入 DB 時就保存原檔、縮圖與 keyframe 的 file ID，不需要等下一次 scan。
+- 啟動時只 `stat` 資料庫已知的路徑，不會掃整個 Volume 計算 SHA-256。只有 filesystem event 指向一個新搬入的資料夾時，才會走訪該子樹以接上其中已知 file ID。
+
+SHA-256 仍用於內容去重；它不能在沒有 index 或 filesystem event 的情況下告訴系統「檔案搬到哪裡」。如果程式關閉期間把檔案搬出 managed library、跨 filesystem 複製後刪除，inode 也會改變，系統只能先標成 `missing`。這種情況之後可再加一個由使用者指定範圍的 relink job，以 size/mtime 縮小候選後才計算 SHA-256，而不是無條件掃所有磁碟。
 
 ## MCP：讓 LLM 匯入照片
 

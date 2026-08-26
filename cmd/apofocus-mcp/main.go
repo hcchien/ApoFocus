@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/hcchien/apofocus/internal/ingest"
 	"github.com/hcchien/apofocus/internal/mcpserver"
+	"github.com/hcchien/apofocus/internal/storagewatch"
 )
 
 func main() {
@@ -37,13 +39,35 @@ func main() {
 	}
 	cancel()
 
-	manager, err := ingest.NewManager(libraryRoot, importRoots, ingest.NewHTTPAnalyzer(embeddingURL), ingest.NewPostgresRepository(db))
+	storageRepository := storagewatch.NewPostgresRepository(db)
+	root, err := storageRepository.EnsureRoot(context.Background(), libraryRoot)
+	if errors.Is(err, storagewatch.ErrRootOffline) {
+		logger.Error("managed library is offline", "path", libraryRoot)
+		os.Exit(1)
+	}
+	if err != nil {
+		logger.Error("configure managed library", "error", err)
+		os.Exit(1)
+	}
+	manager, err := ingest.NewManager(root.BasePath, importRoots, ingest.NewHTTPAnalyzer(embeddingURL), ingest.NewPostgresRepository(db, root.ID))
 	if err != nil {
 		logger.Error("configure importer", "error", err)
 		os.Exit(1)
 	}
-	server := mcpserver.New(manager, importRoots, libraryRoot)
-	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
+	serverContext, stop := context.WithCancel(context.Background())
+	defer stop()
+	watcher, err := storagewatch.NewWatcher(root, storageRepository, logger)
+	if err != nil {
+		logger.Error("watch managed library", "error", err)
+		os.Exit(1)
+	}
+	go func() {
+		if watchErr := watcher.Run(serverContext); watchErr != nil && !errors.Is(watchErr, context.Canceled) {
+			logger.Error("filesystem watcher stopped", "error", watchErr)
+		}
+	}()
+	server := mcpserver.New(manager, importRoots, root.BasePath)
+	if err := server.Run(serverContext, &mcp.StdioTransport{}); err != nil {
 		logger.Error("run MCP server", "error", err)
 		os.Exit(1)
 	}

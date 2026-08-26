@@ -24,7 +24,8 @@ SELECT p.id::text, p.title, p.capture_year, COALESCE(pr.name, ''), p.taken_at,
        COALESCE(p.file_size, ''), COALESCE(p.location_name, ''), p.latitude, p.longitude,
        COALESCE(p.path, ''), COALESCE(p.thumbnail_path, ''), p.image_url, p.thumbnail_url,
        COALESCE(p.aspect_ratio, 'landscape'), COALESCE(p.dominant_color, '#757575'),
-       COALESCE(p.metadata, '{}'::jsonb)::text
+       COALESCE(p.metadata, '{}'::jsonb)::text,
+       COALESCE(p.availability_status, 'unknown'), COALESCE(p.thumbnail_status, 'unknown')
 FROM photos p
 LEFT JOIN projects pr ON pr.id = p.project_id`
 
@@ -188,7 +189,8 @@ func scanPhotoFields(row scanner, similarity *float64) (Photo, error) {
 	values := []any{&photo.ID, &photo.Title, &photo.Year, &photo.Project, &photo.TakenAt, &tagsJSON,
 		&photo.Camera, &photo.Lens, &photo.Aperture, &photo.ShutterSpeed, &photo.ISO, &photo.FocalLength,
 		&photo.Dimensions, &photo.FileType, &photo.FileSize, &locationName, &latitude, &longitude,
-		&photo.Path, &photo.ThumbnailPath, &photo.ImageURL, &photo.ThumbnailURL, &photo.AspectRatio, &photo.Dominant, &metadataJSON}
+		&photo.Path, &photo.ThumbnailPath, &photo.ImageURL, &photo.ThumbnailURL, &photo.AspectRatio, &photo.Dominant, &metadataJSON,
+		&photo.Availability, &photo.ThumbnailState}
 	if similarity != nil {
 		values = append([]any{similarity}, values...)
 	}

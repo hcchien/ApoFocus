@@ -9,11 +9,16 @@ import (
 )
 
 type PostgresRepository struct {
-	db *sql.DB
+	db            *sql.DB
+	storageRootID string
 }
 
-func NewPostgresRepository(db *sql.DB) *PostgresRepository {
-	return &PostgresRepository{db: db}
+func NewPostgresRepository(db *sql.DB, storageRootIDs ...string) *PostgresRepository {
+	rootID := ""
+	if len(storageRootIDs) > 0 {
+		rootID = storageRootIDs[0]
+	}
+	return &PostgresRepository{db: db, storageRootID: rootID}
 }
 
 func (r *PostgresRepository) FindByHash(ctx context.Context, hash string) (ExistingPhoto, bool, error) {
@@ -64,16 +69,19 @@ func (r *PostgresRepository) Insert(ctx context.Context, record PhotoRecord) (st
 			project_id, title, capture_year, taken_at, camera, lens, aperture, shutter_speed,
 			iso, focal_length, dimensions, file_type, file_size, location_name, latitude, longitude,
 			path, thumbnail_path, content_sha256, image_url, thumbnail_url, aspect_ratio,
-			dominant_color, metadata, embedding
+			dominant_color, metadata, embedding, storage_root_id, relative_path, file_id,
+			availability_status, last_verified_at, thumbnail_relative_path, thumbnail_file_id, thumbnail_status
 		) VALUES(
 			$1, $2, $3, $4, NULLIF($5,''), NULLIF($6,''), NULLIF($7,''), NULLIF($8,''),
 			NULLIF($9,0), NULLIF($10,''), NULLIF($11,''), NULLIF($12,''), $13, NULLIF($14,''), $15, $16,
-			$17, $18, $19, $20, $21, $22, NULLIF($23,''), $24::jsonb, $25::vector
+			$17, $18, $19, $20, $21, $22, NULLIF($23,''), $24::jsonb, $25::vector,
+			NULLIF($26,'')::uuid, NULLIF($27,''), NULLIF($28,''), 'available', now(), NULLIF($29,''), NULLIF($30,''), 'available'
 		) RETURNING id::text`,
 		projectID, record.Title, record.Year, record.TakenAt, record.Camera, record.Lens, record.Aperture, record.ShutterSpeed,
 		record.ISO, record.FocalLength, record.Dimensions, record.FileType, humanBytes(record.FileSizeBytes), locationName,
 		latitude, longitude, record.Path, record.ThumbnailPath, record.ContentSHA256, record.ImageURL, record.ThumbnailURL,
-		record.AspectRatio, record.DominantColor, metadata, vectorLiteral(record.embedding)).Scan(&photoID)
+		record.AspectRatio, record.DominantColor, metadata, vectorLiteral(record.embedding), r.storageRootID,
+		record.RelativePath, record.FileID, record.ThumbnailRelativePath, record.ThumbnailFileID).Scan(&photoID)
 	if err != nil {
 		return "", fmt.Errorf("insert photo: %w", err)
 	}

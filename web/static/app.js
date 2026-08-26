@@ -250,9 +250,9 @@ function renderPhotos() {
   $("#empty-state").hidden = state.photos.length > 0;
   grid.hidden = state.photos.length === 0;
   grid.innerHTML = state.photos.map((photo) => `
-    <button class="photo-card ${photo.aspectRatio === "portrait" ? "portrait" : ""}" data-photo-id="${escapeAttr(photo.id)}" style="background:${escapeAttr(photo.dominantColor)}" aria-label="查看 ${escapeAttr(photo.title)}">
+    <button class="photo-card ${photo.aspectRatio === "portrait" ? "portrait" : ""} ${photo.availabilityStatus && photo.availabilityStatus !== "available" && photo.availabilityStatus !== "unknown" ? "unavailable" : ""}" data-photo-id="${escapeAttr(photo.id)}" style="background:${escapeAttr(photo.dominantColor)}" aria-label="查看 ${escapeAttr(photo.title)}">
       <img src="${escapeAttr(photo.thumbnailUrl)}" alt="" loading="lazy" decoding="async">
-      <span class="card-badge">${escapeHTML(photo.fileType)}</span>
+      <span class="card-badge">${escapeHTML(availabilityLabel(photo.availabilityStatus) || photo.fileType)}</span>
       <span class="card-copy"><h3>${escapeHTML(photo.title)}</h3><p>${escapeHTML(photo.project)} · ${photo.year}</p></span>
     </button>`).join("");
   $$(".photo-card", grid).forEach((card) => card.addEventListener("click", () => openDetail(card.dataset.photoId)));
@@ -276,10 +276,10 @@ function renderMediaAssets() {
   $("#empty-state").hidden = state.mediaItems.length > 0;
   grid.hidden = state.mediaItems.length === 0;
   grid.innerHTML = state.mediaItems.map((asset) => `
-    <button class="photo-card media-card" data-media-id="${escapeAttr(asset.id)}" aria-label="查看 ${escapeAttr(asset.title)}">
+    <button class="photo-card media-card ${asset.availabilityStatus && asset.availabilityStatus !== "available" && asset.availabilityStatus !== "unknown" ? "unavailable" : ""}" data-media-id="${escapeAttr(asset.id)}" aria-label="查看 ${escapeAttr(asset.title)}">
       <img src="${escapeAttr(asset.thumbnailUrl)}" alt="" loading="lazy" decoding="async">
       <span class="media-kind">${state.mediaType === "videos" ? "▶" : "♪"}</span>
-      <span class="card-badge">${escapeHTML(formatDuration(asset.durationMs))}</span>
+      <span class="card-badge">${escapeHTML(availabilityLabel(asset.availabilityStatus) || formatDuration(asset.durationMs))}</span>
       <span class="card-copy"><h3>${escapeHTML(asset.title)}</h3><p>${escapeHTML(asset.project)} · ${asset.year} · ${escapeHTML(asset.codec)}</p></span>
     </button>`).join("");
   $$('[data-media-id]', grid).forEach((card) => card.addEventListener("click", () => openMediaDetail(card.dataset.mediaId)));
@@ -401,13 +401,13 @@ function openDetail(id) {
   const photo = state.photos.find((item) => item.id === id);
   if (!photo) return;
   state.selected = photo;
-  $("#detail-image").src = photo.imageUrl;
+  $("#detail-image").src = photo.availabilityStatus === "available" || photo.availabilityStatus === "unknown" ? photo.imageUrl : photo.thumbnailUrl;
   $("#detail-image").alt = photo.title;
   $("#detail-project").textContent = photo.project;
   $("#detail-title").textContent = photo.title;
   $("#detail-date").textContent = formatDate(photo.takenAt);
   $("#detail-exif").innerHTML = dlItems([["相機", photo.camera], ["鏡頭", photo.lens], ["光圈", photo.aperture], ["快門", photo.shutterSpeed], ["ISO", photo.iso], ["焦距", photo.focalLength]]);
-  $("#detail-file").innerHTML = dlItems([["格式", photo.fileType], ["尺寸", photo.dimensions], ["檔案大小", photo.fileSize], ["年份", photo.year]]);
+  $("#detail-file").innerHTML = dlItems([["格式", photo.fileType], ["尺寸", photo.dimensions], ["檔案大小", photo.fileSize], ["年份", photo.year], ["原檔狀態", availabilityLabel(photo.availabilityStatus, true)], ["縮圖狀態", availabilityLabel(photo.thumbnailStatus, true)]]);
   $("#detail-tags").innerHTML = photo.tags.map((tag) => `<span># ${escapeHTML(tag)}</span>`).join("");
   $("#detail-location-section").hidden = !photo.location;
   if (photo.location) {
@@ -470,6 +470,7 @@ async function openMediaDetail(id) {
     $("#media-detail-info").innerHTML = dlItems([
       ["長度", formatDuration(asset.durationMs)], ["Codec", asset.codec], ["格式", asset.mimeType],
       ["尺寸", asset.dimensions], ["取樣率", asset.sampleRate ? `${asset.sampleRate} Hz` : "—"], ["聲道", asset.channels],
+      ["原檔狀態", availabilityLabel(asset.availabilityStatus, true)], ["預覽圖狀態", availabilityLabel(asset.thumbnailStatus, true)],
     ]);
     $("#media-detail-tags").innerHTML = (asset.tags || []).map((tag) => `<span># ${escapeHTML(tag)}</span>`).join("");
     $("#media-detail-transcript").textContent = asset.transcript || "沒有偵測到可辨識的語音。";
@@ -542,6 +543,11 @@ function formatDuration(milliseconds) {
   const minutes = Math.floor((seconds % 3600) / 60);
   const remainder = seconds % 60;
   return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}` : `${minutes}:${String(remainder).padStart(2, "0")}`;
+}
+
+function availabilityLabel(status, includeAvailable = false) {
+  const labels = { available: "可使用", missing: "找不到檔案", volume_offline: "磁碟離線", unknown: "尚未確認" };
+  return status === "available" && !includeAvailable ? "" : (labels[status] || "");
 }
 
 function updateBatchCopy() {

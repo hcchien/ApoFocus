@@ -14,17 +14,19 @@ type ImportRequest struct {
 }
 
 type Segment struct {
-	SegmentType  string         `json:"segmentType"`
-	Index        int            `json:"index"`
-	StartMS      int64          `json:"startMs"`
-	EndMS        int64          `json:"endMs"`
-	KeyframePath string         `json:"keyframePath"`
-	KeyframeURL  string         `json:"-"`
-	Transcript   string         `json:"transcript"`
-	Tags         []string       `json:"tags"`
-	VisualVector []float32      `json:"visualVector"`
-	AudioVector  []float32      `json:"audioVector"`
-	Metadata     map[string]any `json:"metadata,omitempty"`
+	SegmentType          string         `json:"segmentType"`
+	Index                int            `json:"index"`
+	StartMS              int64          `json:"startMs"`
+	EndMS                int64          `json:"endMs"`
+	KeyframePath         string         `json:"keyframePath"`
+	KeyframeRelativePath string         `json:"-"`
+	KeyframeFileID       string         `json:"-"`
+	KeyframeURL          string         `json:"-"`
+	Transcript           string         `json:"transcript"`
+	Tags                 []string       `json:"tags"`
+	VisualVector         []float32      `json:"visualVector"`
+	AudioVector          []float32      `json:"audioVector"`
+	Metadata             map[string]any `json:"metadata,omitempty"`
 }
 
 type Analysis struct {
@@ -55,26 +57,30 @@ type ExistingMedia struct {
 }
 
 type Record struct {
-	MediaType     string
-	Title         string
-	Year          int
-	Project       string
-	RecordedAt    time.Time
-	DurationMS    int64
-	MimeType      string
-	Codec         string
-	Dimensions    string
-	SampleRate    int
-	Channels      int
-	Path          string
-	ThumbnailPath string
-	ContentSHA256 string
-	MediaURL      string
-	ThumbnailURL  string
-	Transcript    string
-	Tags          []string
-	Metadata      map[string]any
-	Segments      []Segment
+	MediaType             string
+	Title                 string
+	Year                  int
+	Project               string
+	RecordedAt            time.Time
+	DurationMS            int64
+	MimeType              string
+	Codec                 string
+	Dimensions            string
+	SampleRate            int
+	Channels              int
+	Path                  string
+	ThumbnailPath         string
+	RelativePath          string
+	ThumbnailRelativePath string
+	FileID                string
+	ThumbnailFileID       string
+	ContentSHA256         string
+	MediaURL              string
+	ThumbnailURL          string
+	Transcript            string
+	Tags                  []string
+	Metadata              map[string]any
+	Segments              []Segment
 }
 
 type Repository interface {

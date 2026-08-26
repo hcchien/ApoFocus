@@ -14,7 +14,8 @@ SELECT m.id::text, m.media_type, m.title, m.capture_year, COALESCE(pr.name, ''),
        m.duration_ms, m.mime_type, m.codec, m.dimensions, COALESCE(m.sample_rate, 0), COALESCE(m.channels, 0),
        COALESCE((SELECT json_agg(t.name ORDER BY t.name) FROM media_asset_tags mat JOIN tags t ON t.id=mat.tag_id WHERE mat.media_asset_id=m.id), '[]')::text,
        m.path, COALESCE(m.thumbnail_path, ''), m.media_url, m.thumbnail_url, m.transcript,
-       COALESCE(m.metadata, '{}'::jsonb)::text
+       COALESCE(m.metadata, '{}'::jsonb)::text,
+       COALESCE(m.availability_status, 'unknown'), COALESCE(m.thumbnail_status, 'unknown')
 FROM media_assets m
 LEFT JOIN projects pr ON pr.id=m.project_id`
 
@@ -52,7 +53,7 @@ func (s *PostgresStore) GetMedia(ctx context.Context, mediaType, id string) (Med
 	if err != nil {
 		return MediaAsset{}, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id::text,segment_type,segment_index,start_ms,end_ms,keyframe_url,transcript,tags::text,metadata::text
+	rows, err := s.db.QueryContext(ctx, `SELECT id::text,segment_type,segment_index,start_ms,end_ms,keyframe_url,transcript,tags::text,metadata::text,COALESCE(keyframe_status,'unknown')
 		FROM media_segments WHERE media_asset_id=$1 ORDER BY start_ms,segment_type,segment_index`, id)
 	if err != nil {
 		return MediaAsset{}, err
@@ -61,7 +62,7 @@ func (s *PostgresStore) GetMedia(ctx context.Context, mediaType, id string) (Med
 	for rows.Next() {
 		var segment MediaSegment
 		var tagsJSON, metadataJSON string
-		if err := rows.Scan(&segment.ID, &segment.SegmentType, &segment.Index, &segment.StartMS, &segment.EndMS, &segment.KeyframeURL, &segment.Transcript, &tagsJSON, &metadataJSON); err != nil {
+		if err := rows.Scan(&segment.ID, &segment.SegmentType, &segment.Index, &segment.StartMS, &segment.EndMS, &segment.KeyframeURL, &segment.Transcript, &tagsJSON, &metadataJSON, &segment.KeyframeState); err != nil {
 			return MediaAsset{}, err
 		}
 		if err := json.Unmarshal([]byte(tagsJSON), &segment.Tags); err != nil {
@@ -204,7 +205,8 @@ func scanMedia(row scanner) (MediaAsset, error) {
 	var tagsJSON, metadataJSON string
 	if err := row.Scan(&asset.ID, &asset.MediaType, &asset.Title, &asset.Year, &asset.Project, &asset.RecordedAt,
 		&asset.DurationMS, &asset.MimeType, &asset.Codec, &asset.Dimensions, &asset.SampleRate, &asset.Channels,
-		&tagsJSON, &asset.Path, &asset.ThumbnailPath, &asset.MediaURL, &asset.ThumbnailURL, &asset.Transcript, &metadataJSON); err != nil {
+		&tagsJSON, &asset.Path, &asset.ThumbnailPath, &asset.MediaURL, &asset.ThumbnailURL, &asset.Transcript, &metadataJSON,
+		&asset.Availability, &asset.ThumbnailState); err != nil {
 		return MediaAsset{}, err
 	}
 	if err := json.Unmarshal([]byte(tagsJSON), &asset.Tags); err != nil {

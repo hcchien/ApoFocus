@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+
+	"github.com/hcchien/apofocus/internal/fileidentity"
 )
 
 const maxPhotoBytes int64 = 2 << 30
@@ -147,14 +149,28 @@ func (m *Manager) Import(ctx context.Context, request ImportRequest) (ImportResu
 			_ = os.Remove(thumbnailPath)
 		}
 	}
+	originalIdentity, err := fileidentity.FromPath(originalPath)
+	if err != nil {
+		cleanup()
+		return ImportResult{}, fmt.Errorf("identify managed photo: %w", err)
+	}
+	thumbnailIdentity, err := fileidentity.FromPath(thumbnailPath)
+	if err != nil {
+		cleanup()
+		return ImportResult{}, fmt.Errorf("identify managed thumbnail: %w", err)
+	}
 
 	record := PhotoRecord{
-		Inspection:    inspection,
-		Path:          originalPath,
-		ThumbnailPath: thumbnailPath,
-		ImageURL:      mediaURL(m.libraryRoot, originalPath),
-		ThumbnailURL:  mediaURL(m.libraryRoot, thumbnailPath),
-		Tags:          inspection.SuggestedTags,
+		Inspection:            inspection,
+		Path:                  originalPath,
+		ThumbnailPath:         thumbnailPath,
+		RelativePath:          managedRelativePath(m.libraryRoot, originalPath),
+		ThumbnailRelativePath: managedRelativePath(m.libraryRoot, thumbnailPath),
+		FileID:                originalIdentity.FileID,
+		ThumbnailFileID:       thumbnailIdentity.FileID,
+		ImageURL:              mediaURL(m.libraryRoot, originalPath),
+		ThumbnailURL:          mediaURL(m.libraryRoot, thumbnailPath),
+		Tags:                  inspection.SuggestedTags,
 	}
 	photoID, err := m.repository.Insert(ctx, record)
 	if err != nil {
@@ -165,6 +181,14 @@ func (m *Manager) Import(ctx context.Context, request ImportRequest) (ImportResu
 		PhotoID: photoID, Path: originalPath, ThumbnailPath: thumbnailPath,
 		Tags: record.Tags, VectorDimensions: len(inspection.embedding),
 	}, nil
+}
+
+func managedRelativePath(root, path string) string {
+	relative, err := filepath.Rel(root, path)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return ""
+	}
+	return filepath.ToSlash(relative)
 }
 
 func (m *Manager) inspectMetadata(request ImportRequest) (Inspection, error) {

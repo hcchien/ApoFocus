@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/hcchien/apofocus/internal/fileidentity"
 )
 
 const maxMediaBytes int64 = 64 << 30
@@ -131,13 +133,32 @@ func (m *Manager) Import(ctx context.Context, request ImportRequest) (ImportResu
 	}
 	for index := range analysis.Segments {
 		if analysis.Segments[index].KeyframePath != "" {
+			identity, identityErr := fileidentity.FromPath(analysis.Segments[index].KeyframePath)
+			if identityErr != nil {
+				cleanup()
+				return ImportResult{}, fmt.Errorf("identify keyframe: %w", identityErr)
+			}
+			analysis.Segments[index].KeyframeRelativePath = managedRelativePath(m.libraryRoot, analysis.Segments[index].KeyframePath)
+			analysis.Segments[index].KeyframeFileID = identity.FileID
 			analysis.Segments[index].KeyframeURL = mediaURL(m.libraryRoot, analysis.Segments[index].KeyframePath)
 		}
+	}
+	originalIdentity, err := fileidentity.FromPath(originalPath)
+	if err != nil {
+		cleanup()
+		return ImportResult{}, fmt.Errorf("identify managed media: %w", err)
+	}
+	thumbnailIdentity, err := fileidentity.FromPath(thumbnailPath)
+	if err != nil {
+		cleanup()
+		return ImportResult{}, fmt.Errorf("identify managed media thumbnail: %w", err)
 	}
 	record := Record{
 		MediaType: mediaType, Title: title, Year: recordedAt.Year(), Project: project, RecordedAt: recordedAt,
 		DurationMS: analysis.DurationMS, MimeType: analysis.MimeType, Codec: analysis.Codec, Dimensions: analysis.Dimensions,
 		SampleRate: analysis.SampleRate, Channels: analysis.Channels, Path: originalPath, ThumbnailPath: thumbnailPath,
+		RelativePath: managedRelativePath(m.libraryRoot, originalPath), ThumbnailRelativePath: managedRelativePath(m.libraryRoot, thumbnailPath),
+		FileID: originalIdentity.FileID, ThumbnailFileID: thumbnailIdentity.FileID,
 		ContentSHA256: hash, MediaURL: mediaURL(m.libraryRoot, originalPath), ThumbnailURL: mediaURL(m.libraryRoot, thumbnailPath),
 		Transcript: analysis.Transcript, Tags: mergeTags(request.Tags, analysis.Tags), Metadata: analysis.Metadata, Segments: analysis.Segments,
 	}
@@ -147,6 +168,14 @@ func (m *Manager) Import(ctx context.Context, request ImportRequest) (ImportResu
 		return ImportResult{}, err
 	}
 	return ImportResult{AssetID: assetID, MediaType: mediaType, Path: originalPath, ThumbnailPath: thumbnailPath, Tags: record.Tags, SegmentCount: len(record.Segments), TranscriptLength: len([]rune(record.Transcript))}, nil
+}
+
+func managedRelativePath(root, path string) string {
+	relative, err := filepath.Rel(root, path)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return ""
+	}
+	return filepath.ToSlash(relative)
 }
 
 func (m *Manager) resolveSource(value string) (string, os.FileInfo, error) {

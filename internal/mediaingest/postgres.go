@@ -8,9 +8,18 @@ import (
 	"strings"
 )
 
-type PostgresRepository struct{ db *sql.DB }
+type PostgresRepository struct {
+	db            *sql.DB
+	storageRootID string
+}
 
-func NewPostgresRepository(db *sql.DB) *PostgresRepository { return &PostgresRepository{db: db} }
+func NewPostgresRepository(db *sql.DB, storageRootIDs ...string) *PostgresRepository {
+	rootID := ""
+	if len(storageRootIDs) > 0 {
+		rootID = storageRootIDs[0]
+	}
+	return &PostgresRepository{db: db, storageRootID: rootID}
+}
 
 func (r *PostgresRepository) FindByHash(ctx context.Context, hash string) (ExistingMedia, bool, error) {
 	var result ExistingMedia
@@ -43,11 +52,13 @@ func (r *PostgresRepository) Insert(ctx context.Context, record Record) (string,
 		return "", err
 	}
 	var assetID string
-	err = tx.QueryRowContext(ctx, `INSERT INTO media_assets(media_type,project_id,title,capture_year,recorded_at,duration_ms,mime_type,codec,dimensions,sample_rate,channels,path,thumbnail_path,content_sha256,media_url,thumbnail_url,transcript,metadata)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,NULLIF($10,0),NULLIF($11,0),$12,$13,$14,$15,$16,$17,$18::jsonb) RETURNING id::text`,
+	err = tx.QueryRowContext(ctx, `INSERT INTO media_assets(media_type,project_id,title,capture_year,recorded_at,duration_ms,mime_type,codec,dimensions,sample_rate,channels,path,thumbnail_path,content_sha256,media_url,thumbnail_url,transcript,metadata,
+		storage_root_id,relative_path,file_id,availability_status,last_verified_at,thumbnail_relative_path,thumbnail_file_id,thumbnail_status)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,NULLIF($10,0),NULLIF($11,0),$12,$13,$14,$15,$16,$17,$18::jsonb,NULLIF($19,'')::uuid,NULLIF($20,''),NULLIF($21,''),'available',now(),NULLIF($22,''),NULLIF($23,''),'available') RETURNING id::text`,
 		record.MediaType, projectID, record.Title, record.Year, record.RecordedAt, record.DurationMS, record.MimeType, record.Codec,
 		record.Dimensions, record.SampleRate, record.Channels, record.Path, record.ThumbnailPath, record.ContentSHA256,
-		record.MediaURL, record.ThumbnailURL, record.Transcript, metadata).Scan(&assetID)
+		record.MediaURL, record.ThumbnailURL, record.Transcript, metadata, r.storageRootID, record.RelativePath,
+		record.FileID, record.ThumbnailRelativePath, record.ThumbnailFileID).Scan(&assetID)
 	if err != nil {
 		return "", fmt.Errorf("insert media asset: %w", err)
 	}
@@ -69,10 +80,11 @@ func (r *PostgresRepository) Insert(ctx context.Context, record Record) (string,
 		if err != nil {
 			return "", err
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO media_segments(media_asset_id,segment_index,segment_type,start_ms,end_ms,keyframe_path,keyframe_url,transcript,tags,visual_embedding,audio_embedding,metadata)
-			VALUES($1,$2,$3,$4,$5,NULLIF($6,''),$7,$8,$9::jsonb,NULLIF($10,'')::vector,NULLIF($11,'')::vector,$12::jsonb)`,
+		if _, err := tx.ExecContext(ctx, `INSERT INTO media_segments(media_asset_id,segment_index,segment_type,start_ms,end_ms,keyframe_path,keyframe_url,transcript,tags,visual_embedding,audio_embedding,metadata,keyframe_relative_path,keyframe_file_id,keyframe_status,last_verified_at)
+			VALUES($1,$2,$3,$4,$5,NULLIF($6,''),$7,$8,$9::jsonb,NULLIF($10,'')::vector,NULLIF($11,'')::vector,$12::jsonb,NULLIF($13,''),NULLIF($14,''),CASE WHEN $6='' THEN 'unknown' ELSE 'available' END,CASE WHEN $6='' THEN NULL ELSE now() END)`,
 			assetID, segment.Index, segment.SegmentType, segment.StartMS, segment.EndMS, segment.KeyframePath, segment.KeyframeURL,
-			segment.Transcript, tags, vectorLiteral(segment.VisualVector), vectorLiteral(segment.AudioVector), segmentMetadata); err != nil {
+			segment.Transcript, tags, vectorLiteral(segment.VisualVector), vectorLiteral(segment.AudioVector), segmentMetadata,
+			segment.KeyframeRelativePath, segment.KeyframeFileID); err != nil {
 			return "", fmt.Errorf("insert media segment %s/%d: %w", segment.SegmentType, segment.Index, err)
 		}
 	}

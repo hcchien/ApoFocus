@@ -1,0 +1,92 @@
+#!/bin/bash
+
+set -euo pipefail
+
+STATE_DIR="${APOFOCUS_STATE_DIR:-$HOME/Library/Application Support/ApoFocus}"
+CONFIG_FILE="$STATE_DIR/apofocus.env"
+LAUNCH_AGENT_DIR="$HOME/Library/LaunchAgents"
+DOMAIN="gui/$(id -u)"
+LABELS=(com.apofocus.postgres com.apofocus.embedding com.apofocus.web)
+
+if [[ -f "$CONFIG_FILE" ]]; then
+  # The installer owns this file and writes shell-escaped values with mode 600.
+  # shellcheck disable=SC1090
+  source "$CONFIG_FILE"
+fi
+
+usage() {
+  echo "Usage: apofocusctl {start|stop|restart|status|doctor|logs|open}"
+}
+
+start_services() {
+  local label plist
+  for label in "${LABELS[@]}"; do
+    plist="$LAUNCH_AGENT_DIR/$label.plist"
+    [[ -f "$plist" ]] || { echo "Missing $plist" >&2; exit 1; }
+    if ! launchctl print "$DOMAIN/$label" >/dev/null 2>&1; then
+      launchctl bootstrap "$DOMAIN" "$plist"
+    fi
+  done
+}
+
+stop_services() {
+  local index label
+  for ((index=${#LABELS[@]}-1; index>=0; index--)); do
+    label="${LABELS[$index]}"
+    launchctl bootout "$DOMAIN/$label" >/dev/null 2>&1 || true
+  done
+  if [[ -n "${POSTGRES_PORT:-}" ]]; then
+    for _ in $(seq 1 40); do
+      if ! lsof -nP -iTCP:"$POSTGRES_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+        break
+      fi
+      sleep 0.25
+    done
+  fi
+}
+
+status_services() {
+  local label state
+  for label in "${LABELS[@]}"; do
+    if state="$(launchctl print "$DOMAIN/$label" 2>/dev/null | awk -F'= ' '/state =/{print $2; exit}')"; then
+      printf '%-25s %s\n' "$label" "${state:-loaded}"
+    else
+      printf '%-25s %s\n' "$label" "stopped"
+    fi
+  done
+}
+
+doctor() {
+  local failed=0
+  status_services
+  if [[ -n "${POSTGRES_BIN:-}" && -n "${DATABASE_URL:-}" ]] && "$POSTGRES_BIN/psql" "$DATABASE_URL" -Atqc "SELECT extversion FROM pg_extension WHERE extname='vector'" >/dev/null 2>&1; then
+    echo "PostgreSQL + pgvector: ok"
+  else
+    echo "PostgreSQL + pgvector: failed"
+    failed=1
+  fi
+  if curl -fsS http://127.0.0.1:8090/healthz >/dev/null; then
+    echo "Embedding service: ok"
+  else
+    echo "Embedding service: failed"
+    failed=1
+  fi
+  if curl -fsS "${APOFOCUS_APP_URL:-http://127.0.0.1:8080}/api/v1/photos?limit=1" >/dev/null; then
+    echo "ApoFocus web: ok"
+  else
+    echo "ApoFocus web: failed"
+    failed=1
+  fi
+  return "$failed"
+}
+
+case "${1:-}" in
+  start) start_services ;;
+  stop) stop_services ;;
+  restart) stop_services; start_services ;;
+  status) status_services ;;
+  doctor) doctor ;;
+  logs) tail -n 100 -F "$HOME/Library/Logs/ApoFocus/"*.log ;;
+  open) open "${APOFOCUS_APP_URL:-http://127.0.0.1:8080}" ;;
+  *) usage; exit 2 ;;
+esac

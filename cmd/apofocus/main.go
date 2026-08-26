@@ -21,6 +21,7 @@ import (
 	"github.com/hcchien/apofocus/internal/httpapi"
 	"github.com/hcchien/apofocus/internal/ingest"
 	"github.com/hcchien/apofocus/internal/mediaingest"
+	"github.com/hcchien/apofocus/internal/storagewatch"
 )
 
 func main() {
@@ -40,14 +41,42 @@ func main() {
 	if db != nil {
 		options.Media = store.(catalog.MediaStore)
 		options.Folders = folders.NewPostgresRepository(db)
-		if rootsValue := os.Getenv("APOFOCUS_IMPORT_ROOTS"); mediaRoot != "" && rootsValue != "" {
+		storageRootID := ""
+		libraryOnline := false
+		if mediaRoot != "" {
+			storageRepository := storagewatch.NewPostgresRepository(db)
+			root, rootErr := storageRepository.EnsureRoot(ctx, mediaRoot)
+			if errors.Is(rootErr, storagewatch.ErrRootOffline) {
+				logger.Warn("managed library is offline", "path", mediaRoot)
+			} else if rootErr != nil {
+				logger.Error("configure managed library", "error", rootErr)
+				os.Exit(1)
+			} else {
+				mediaRoot = root.BasePath
+				options.MediaRoot = root.BasePath
+				storageRootID = root.ID
+				libraryOnline = true
+				watcher, watcherErr := storagewatch.NewWatcher(root, storageRepository, logger)
+				if watcherErr != nil {
+					logger.Error("watch managed library", "error", watcherErr)
+					os.Exit(1)
+				}
+				go func() {
+					if watchErr := watcher.Run(ctx); watchErr != nil && !errors.Is(watchErr, context.Canceled) {
+						logger.Error("filesystem watcher stopped", "error", watchErr)
+					}
+				}()
+				logger.Info("managed library filesystem watcher enabled", "path", root.BasePath)
+			}
+		}
+		if rootsValue := os.Getenv("APOFOCUS_IMPORT_ROOTS"); libraryOnline && rootsValue != "" {
 			analyzerURL := envOr("EMBEDDING_SERVICE_URL", "http://127.0.0.1:8090")
-			manager, managerErr := ingest.NewManager(mediaRoot, splitPaths(rootsValue), ingest.NewHTTPAnalyzer(analyzerURL), ingest.NewPostgresRepository(db))
+			manager, managerErr := ingest.NewManager(mediaRoot, splitPaths(rootsValue), ingest.NewHTTPAnalyzer(analyzerURL), ingest.NewPostgresRepository(db, storageRootID))
 			if managerErr != nil {
 				logger.Error("configure batch importer", "error", managerErr)
 				os.Exit(1)
 			}
-			mediaManager, mediaManagerErr := mediaingest.NewManager(mediaRoot, splitPaths(rootsValue), mediaingest.NewHTTPAnalyzer(analyzerURL), mediaingest.NewPostgresRepository(db))
+			mediaManager, mediaManagerErr := mediaingest.NewManager(mediaRoot, splitPaths(rootsValue), mediaingest.NewHTTPAnalyzer(analyzerURL), mediaingest.NewPostgresRepository(db, storageRootID))
 			if mediaManagerErr != nil {
 				logger.Error("configure video/audio importer", "error", mediaManagerErr)
 				os.Exit(1)

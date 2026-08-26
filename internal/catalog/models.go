@@ -12,30 +12,32 @@ type Location struct {
 }
 
 type Photo struct {
-	ID            string         `json:"id"`
-	Title         string         `json:"title"`
-	Year          int            `json:"year"`
-	Project       string         `json:"project"`
-	TakenAt       time.Time      `json:"takenAt"`
-	Tags          []string       `json:"tags"`
-	Camera        string         `json:"camera"`
-	Lens          string         `json:"lens"`
-	Aperture      string         `json:"aperture"`
-	ShutterSpeed  string         `json:"shutterSpeed"`
-	ISO           int            `json:"iso"`
-	FocalLength   string         `json:"focalLength"`
-	Dimensions    string         `json:"dimensions"`
-	FileType      string         `json:"fileType"`
-	FileSize      string         `json:"fileSize"`
-	Location      *Location      `json:"location,omitempty"`
-	Path          string         `json:"-"`
-	ThumbnailPath string         `json:"-"`
-	ImageURL      string         `json:"imageUrl"`
-	ThumbnailURL  string         `json:"thumbnailUrl"`
-	AspectRatio   string         `json:"aspectRatio"`
-	Dominant      string         `json:"dominantColor"`
-	Metadata      map[string]any `json:"metadata,omitempty"`
-	Embedding     []float32      `json:"-"`
+	ID             string         `json:"id"`
+	Title          string         `json:"title"`
+	Year           int            `json:"year"`
+	Project        string         `json:"project"`
+	TakenAt        time.Time      `json:"takenAt"`
+	Tags           []string       `json:"tags"`
+	Camera         string         `json:"camera"`
+	Lens           string         `json:"lens"`
+	Aperture       string         `json:"aperture"`
+	ShutterSpeed   string         `json:"shutterSpeed"`
+	ISO            int            `json:"iso"`
+	FocalLength    string         `json:"focalLength"`
+	Dimensions     string         `json:"dimensions"`
+	FileType       string         `json:"fileType"`
+	FileSize       string         `json:"fileSize"`
+	Location       *Location      `json:"location,omitempty"`
+	Path           string         `json:"-"`
+	ThumbnailPath  string         `json:"-"`
+	ImageURL       string         `json:"imageUrl"`
+	ThumbnailURL   string         `json:"thumbnailUrl"`
+	AspectRatio    string         `json:"aspectRatio"`
+	Dominant       string         `json:"dominantColor"`
+	Availability   string         `json:"availabilityStatus"`
+	ThumbnailState string         `json:"thumbnailStatus"`
+	Metadata       map[string]any `json:"metadata,omitempty"`
+	Embedding      []float32      `json:"-"`
 }
 
 type Filter struct {

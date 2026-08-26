@@ -46,6 +46,7 @@ AUTO_TAG_LIMIT = int(os.getenv("AUTO_TAG_LIMIT", "4"))
 AUTO_TAG_MIN_SCORE = float(os.getenv("AUTO_TAG_MIN_SCORE", "0.18"))
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "base")
 WHISPER_LANGUAGE = os.getenv("WHISPER_LANGUAGE", "")
+WHISPER_DOWNLOAD_ROOT = os.getenv("WHISPER_DOWNLOAD_ROOT", "")
 VIDEO_SAMPLE_SECONDS = max(1, int(os.getenv("VIDEO_SAMPLE_SECONDS", "10")))
 MAX_VIDEO_SEGMENTS = max(1, int(os.getenv("MAX_VIDEO_SEGMENTS", "300")))
 AUDIO_SEGMENT_SECONDS = max(5, int(os.getenv("AUDIO_SEGMENT_SECONDS", "30")))
@@ -366,7 +367,11 @@ def load_whisper_model():
     if not WHISPER_INSTALLED:
         raise HTTPException(status_code=503, detail="openai-whisper is not installed")
     import whisper as whisper_module
-    return whisper_module.load_model(WHISPER_MODEL, device=WHISPER_DEVICE)
+    options = {"device": WHISPER_DEVICE}
+    if WHISPER_DOWNLOAD_ROOT:
+        Path(WHISPER_DOWNLOAD_ROOT).mkdir(parents=True, exist_ok=True)
+        options["download_root"] = WHISPER_DOWNLOAD_ROOT
+    return whisper_module.load_model(WHISPER_MODEL, **options)
 
 
 def transcribe_audio(path: Path) -> tuple[str, list[dict]]:

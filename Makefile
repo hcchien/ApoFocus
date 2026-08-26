@@ -1,4 +1,7 @@
-.PHONY: run test build-mcp build-batch run-mcp migrate-up migrate-down embedding-install embedding-serve embedding-serve-offline embedding-index
+.PHONY: run test build-mcp build-batch run-mcp migrate-up migrate-down embedding-install embedding-serve embedding-serve-offline embedding-index install-macos
+
+install-macos:
+	bash scripts/install_macos.sh
 
 run:
 	go run ./cmd/apofocus
@@ -18,10 +21,10 @@ run-mcp:
 	go run ./cmd/apofocus-mcp
 
 migrate-up:
-	psql "$(DATABASE_URL)" -v ON_ERROR_STOP=1 -f migrations/000001_init.sql -f migrations/000002_ingest.sql -f migrations/000003_folders_and_batch.sql -f migrations/000004_multimedia.sql
+	psql "$(DATABASE_URL)" -v ON_ERROR_STOP=1 -f migrations/000001_init.sql -f migrations/000002_ingest.sql -f migrations/000003_folders_and_batch.sql -f migrations/000004_multimedia.sql -f migrations/000005_storage_tracking.sql
 
 migrate-down:
-	psql "$(DATABASE_URL)" -v ON_ERROR_STOP=1 -f migrations/000004_down.sql -f migrations/000003_down.sql -f migrations/000001_down.sql
+	psql "$(DATABASE_URL)" -v ON_ERROR_STOP=1 -f migrations/000005_down.sql -f migrations/000004_down.sql -f migrations/000003_down.sql -f migrations/000001_down.sql
 
 embedding-install:
 	python3 -m venv .venv
