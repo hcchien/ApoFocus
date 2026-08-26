@@ -9,6 +9,7 @@ ApoFocus 是為職業攝影師設計的照片、影片與音訊索引網站。Go
 - 照片詳情與完整 EXIF 摘要
 - 以選定照片做 cosine similarity 向量搜尋
 - 桌面與手機版照片牆、篩選抽屜及相似照片介面
+- 繁體中文、英文、德文介面，依瀏覽器語言自動選擇並記住使用者設定
 - Photos、Videos、Audios 分離的頂層 tabs，各自連接搜尋、facets、播放器與詳情 API
 - 影片固定間隔 keyframe + OpenCLIP 視覺向量；影片音軌及純音訊以 Whisper 建逐字稿、CLAP 建聲音向量
 - 影片／音訊支援 codec、長度、是否有逐字稿、專題、年份及 Tags 篩選

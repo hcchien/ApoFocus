@@ -1,19 +1,12 @@
+const { t, formatNumber, formatDate: formatLocalizedDate, applyTranslations } = window.ApoFocusI18n;
+
 const mediaConfig = {
-  photos: {
-    label: "照片", title: "全部照片", eyebrow: "PHOTO ARCHIVE", yearLabel: "拍照年份",
-    searchPlaceholder: "搜尋照片、專題、地點、器材…", singular: "photo", unit: "張",
-  },
-  videos: {
-    label: "影片", title: "全部影片", eyebrow: "VIDEO ARCHIVE", yearLabel: "拍攝年份",
-    searchPlaceholder: "搜尋影片場景、逐字稿、專題與 Tags…", singular: "video", unit: "支",
-    emptyTitle: "尚未匯入影片", emptyCopy: "從本機資料夾或外接硬碟批次匯入後，影片會依場景、逐字稿與聲音建立索引。",
-  },
-  audios: {
-    label: "音訊", title: "全部音訊", eyebrow: "AUDIO ARCHIVE", yearLabel: "錄製年份",
-    searchPlaceholder: "搜尋音訊逐字稿、聲音內容、專題與 Tags…", singular: "audio", unit: "段",
-    emptyTitle: "尚未匯入音訊", emptyCopy: "從本機資料夾或外接硬碟批次匯入後，音訊會依逐字稿與聲音向量建立索引。",
-  },
+  photos: { eyebrow: "PHOTO ARCHIVE", singular: "photo" },
+  videos: { eyebrow: "VIDEO ARCHIVE", singular: "video" },
+  audios: { eyebrow: "AUDIO ARCHIVE", singular: "audio" },
 };
+
+const mediaText = (mediaType, key, params) => t(`media.${mediaType}.${key}`, params);
 
 const requestedMedia = new URLSearchParams(window.location.search).get("media");
 
@@ -26,9 +19,12 @@ const state = {
   total: 0,
   selected: null,
   selectedMedia: null,
+  similar: null,
   folderTree: null,
+  selectedFolderSource: null,
   selectedFolder: null,
   batchJobID: null,
+  batchJob: null,
   batchEvents: null,
   filters: { q: "", year: "", project: "", tags: [], camera: "", lens: "", minISO: "", maxISO: "", location: false, codec: "", duration: "", transcript: false },
 };
@@ -102,6 +98,24 @@ function bindEvents() {
   $("#batch-close").addEventListener("click", () => $("#batch-dialog").close());
   $("#batch-form").addEventListener("submit", submitBatch);
   $("#batch-cancel").addEventListener("click", cancelBatch);
+  window.addEventListener("apofocus:localechange", refreshLocalizedUI);
+}
+
+function refreshLocalizedUI() {
+  applyTranslations();
+  applyMediaUI({ syncURL: false });
+  renderActiveFilters();
+  if (state.mediaType === "photos") renderPhotos();
+  else renderMediaAssets();
+  if (state.selected && dialog.open) openDetail(state.selected.id);
+  if (state.selectedMedia && mediaDialog.open) renderMediaDetail(state.selectedMedia, state.mediaType);
+  if (state.similar && similarDialog.open) renderSimilarResults();
+  if (state.folderTree) {
+    renderFolderSources();
+    if (state.selectedFolderSource) renderFolderChildren(state.selectedFolderSource);
+    if (state.selectedFolder) renderFolderPreview(state.selectedFolder);
+  }
+  if (state.batchJob) updateBatchProgress(state.batchJob);
 }
 
 async function loadFacets() {
@@ -109,14 +123,14 @@ async function loadFacets() {
   try {
     const endpoint = mediaType === "photos" ? "/api/v1/facets" : `/api/v1/${mediaType}/facets`;
     const response = await fetch(endpoint);
-    if (!response.ok) throw new Error("無法讀取篩選資料");
+    if (!response.ok) throw new Error(t("filters.unavailable"));
     const facets = await response.json();
     if (mediaType === "photos") state.facets = facets;
     else state.mediaFacets[mediaType] = facets;
     if (state.mediaType === mediaType) renderFacetsForCurrentMedia();
   } catch (error) {
     console.error(error);
-    $("#year-filters").innerHTML = `<p class="result-summary">篩選資料暫時無法使用</p>`;
+    $("#year-filters").innerHTML = `<p class="result-summary">${escapeHTML(t("filters.unavailable"))}</p>`;
   }
 }
 
@@ -138,19 +152,19 @@ async function loadPhotos() {
   if (f.location) params.set("has_location", "true");
   try {
     const response = await fetch(`/api/v1/photos?${params}`);
-    if (!response.ok) throw new Error("無法讀取照片");
+    if (!response.ok) throw new Error(t("media.loadError", { media: mediaText("photos", "label") }));
     const page = await response.json();
     state.photos = page.items || [];
     state.total = page.total || 0;
     renderPhotos();
     renderActiveFilters();
     if (!f.q && !f.year && !f.project && !f.tags.length && !f.camera && !f.lens && !f.minISO && !f.maxISO && !f.location) {
-      $("#all-count").textContent = new Intl.NumberFormat("zh-TW").format(state.total);
-      $("#photos-tab-count").textContent = new Intl.NumberFormat("zh-TW").format(state.total);
+      $("#all-count").textContent = formatNumber(state.total);
+      $("#photos-tab-count").textContent = formatNumber(state.total);
     }
   } catch (error) {
     console.error(error);
-    grid.innerHTML = `<div class="empty-state"><h2>照片資料庫暫時無法使用</h2><p>請確認伺服器或 PostgreSQL 連線後再試一次。</p></div>`;
+    grid.innerHTML = renderLoadError("photos");
   }
 }
 
@@ -170,19 +184,19 @@ async function loadMediaAssets() {
   if (f.transcript) params.set("has_transcript", "true");
   try {
     const response = await fetch(`/api/v1/${mediaType}?${params}`);
-    if (!response.ok) throw new Error(`無法讀取${mediaConfig[mediaType].label}`);
+    if (!response.ok) throw new Error(t("media.loadError", { media: mediaText(mediaType, "label") }));
     const page = await response.json();
     if (state.mediaType !== mediaType) return;
     state.mediaItems = page.items || [];
     state.total = page.total || 0;
     renderMediaAssets();
     renderActiveFilters();
-    const count = new Intl.NumberFormat("zh-TW").format(state.total);
+    const count = formatNumber(state.total);
     $(`#${mediaType}-tab-count`).textContent = count;
     $("#all-count").textContent = count;
   } catch (error) {
     console.error(error);
-    grid.innerHTML = `<div class="empty-state"><h2>${escapeHTML(mediaConfig[mediaType].label)}資料庫暫時無法使用</h2><p>請確認伺服器或 PostgreSQL 連線後再試一次。</p></div>`;
+    grid.innerHTML = renderLoadError(mediaType);
   }
 }
 
@@ -198,18 +212,18 @@ function renderFacets() {
 function renderFacetsForCurrentMedia() {
   const facets = state.mediaType === "photos" ? state.facets : state.mediaFacets[state.mediaType];
   if (!facets) return;
-  $("#year-filters").innerHTML = (facets.years || []).map((item) => facetButton("year", item)).join("") || `<p class="facet-empty">尚無年份資料</p>`;
-  $("#project-filters").innerHTML = (facets.projects || []).map((item) => facetButton("project", item)).join("") || `<p class="facet-empty">尚無專題資料</p>`;
-  $("#tag-filters").innerHTML = (facets.tags || []).slice(0, 12).map((item) => `<button class="tag-pill" data-tag="${escapeAttr(item.value)}">${escapeHTML(item.value)} <span>${item.count}</span></button>`).join("") || `<p class="facet-empty">尚無 Tags</p>`;
+  $("#year-filters").innerHTML = (facets.years || []).map((item) => facetButton("year", item)).join("") || `<p class="facet-empty">${escapeHTML(t("filters.noYears"))}</p>`;
+  $("#project-filters").innerHTML = (facets.projects || []).map((item) => facetButton("project", item)).join("") || `<p class="facet-empty">${escapeHTML(t("filters.noProjects"))}</p>`;
+  $("#tag-filters").innerHTML = (facets.tags || []).slice(0, 12).map((item) => `<button class="tag-pill" data-tag="${escapeAttr(item.value)}">${escapeHTML(item.value)} <span>${formatNumber(item.count)}</span></button>`).join("") || `<p class="facet-empty">${escapeHTML(t("filters.noTags"))}</p>`;
   if (state.mediaType === "photos") {
-    resetFacetSelect($("#camera-filter"), "所有相機");
-    resetFacetSelect($("#lens-filter"), "所有鏡頭");
+    resetFacetSelect($("#camera-filter"), t("filters.allCameras"));
+    resetFacetSelect($("#lens-filter"), t("filters.allLenses"));
     fillSelect($("#camera-filter"), facets.cameras || []);
     fillSelect($("#lens-filter"), facets.lenses || []);
     $("#camera-filter").value = state.filters.camera;
     $("#lens-filter").value = state.filters.lens;
   } else {
-    resetFacetSelect($("#codec-filter"), "所有 Codec");
+    resetFacetSelect($("#codec-filter"), t("filters.allCodecs"));
     fillSelect($("#codec-filter"), facets.codecs || []);
     $("#codec-filter").value = state.filters.codec;
   }
@@ -221,11 +235,15 @@ function resetFacetSelect(select, label) {
 }
 
 function facetButton(kind, item) {
-  return `<button class="facet-row" data-kind="${kind}" data-value="${escapeAttr(item.value)}"><span>${escapeHTML(item.value)}</span><span class="count">${item.count}</span></button>`;
+  return `<button class="facet-row" data-kind="${kind}" data-value="${escapeAttr(item.value)}"><span>${escapeHTML(item.value)}</span><span class="count">${formatNumber(item.count)}</span></button>`;
 }
 
 function fillSelect(select, items) {
-  items.forEach((item) => select.insertAdjacentHTML("beforeend", `<option value="${escapeAttr(item.value)}">${escapeHTML(item.value)} (${item.count})</option>`));
+  items.forEach((item) => select.insertAdjacentHTML("beforeend", `<option value="${escapeAttr(item.value)}">${escapeHTML(item.value)} (${formatNumber(item.count)})</option>`));
+}
+
+function renderLoadError(mediaType) {
+  return `<div class="empty-state"><h2>${escapeHTML(t("media.loadError", { media: mediaText(mediaType, "label") }))}</h2><p>${escapeHTML(t("media.loadErrorCopy"))}</p></div>`;
 }
 
 function onFacetClick(event) {
@@ -245,12 +263,12 @@ function onTagClick(event) {
 }
 
 function renderPhotos() {
-  $("#result-summary").textContent = `找到 ${new Intl.NumberFormat("zh-TW").format(state.total)} 張照片`;
+  $("#result-summary").textContent = mediaText("photos", "results", { count: formatNumber(state.total) });
   renderPhotoEmptyState();
   $("#empty-state").hidden = state.photos.length > 0;
   grid.hidden = state.photos.length === 0;
   grid.innerHTML = state.photos.map((photo) => `
-    <button class="photo-card ${photo.aspectRatio === "portrait" ? "portrait" : ""} ${photo.availabilityStatus && photo.availabilityStatus !== "available" && photo.availabilityStatus !== "unknown" ? "unavailable" : ""}" data-photo-id="${escapeAttr(photo.id)}" style="background:${escapeAttr(photo.dominantColor)}" aria-label="查看 ${escapeAttr(photo.title)}">
+    <button class="photo-card ${photo.aspectRatio === "portrait" ? "portrait" : ""} ${photo.availabilityStatus && photo.availabilityStatus !== "available" && photo.availabilityStatus !== "unknown" ? "unavailable" : ""}" data-photo-id="${escapeAttr(photo.id)}" style="background:${escapeAttr(photo.dominantColor)}" aria-label="${escapeAttr(mediaText("photos", "view", { title: photo.title }))}">
       <img src="${escapeAttr(photo.thumbnailUrl)}" alt="" loading="lazy" decoding="async">
       <span class="card-badge">${escapeHTML(availabilityLabel(photo.availabilityStatus) || photo.fileType)}</span>
       <span class="card-copy"><h3>${escapeHTML(photo.title)}</h3><p>${escapeHTML(photo.project)} · ${photo.year}</p></span>
@@ -260,25 +278,26 @@ function renderPhotos() {
 
 function renderPhotoEmptyState() {
   $("#empty-symbol").textContent = "0";
-  $("#empty-title").textContent = "沒有符合條件的照片";
-  $("#empty-copy").textContent = "試著放寬篩選條件，或換一個搜尋關鍵字。";
-  $("#empty-clear").hidden = false;
+  const filtered = hasActiveFilters();
+  $("#empty-title").textContent = mediaText("photos", filtered ? "emptyFiltered" : "emptyInitial");
+  $("#empty-copy").textContent = filtered ? t("media.emptyFilteredCopy") : mediaText("photos", "emptyInitialCopy");
+  $("#empty-clear").hidden = !filtered;
 }
 
 function renderMediaAssets() {
-  const config = mediaConfig[state.mediaType];
-  $("#result-summary").textContent = `找到 ${new Intl.NumberFormat("zh-TW").format(state.total)} ${config.unit}${config.label}`;
+  const mediaType = state.mediaType;
+  $("#result-summary").textContent = mediaText(mediaType, "results", { count: formatNumber(state.total) });
   const filtered = hasActiveFilters();
-  $("#empty-symbol").textContent = state.mediaType === "videos" ? "▶" : "♪";
-  $("#empty-title").textContent = filtered ? `沒有符合條件的${config.label}` : config.emptyTitle;
-  $("#empty-copy").textContent = filtered ? "試著放寬篩選條件，或換一個搜尋關鍵字。" : config.emptyCopy;
+  $("#empty-symbol").textContent = mediaType === "videos" ? "▶" : "♪";
+  $("#empty-title").textContent = mediaText(mediaType, filtered ? "emptyFiltered" : "emptyInitial");
+  $("#empty-copy").textContent = filtered ? t("media.emptyFilteredCopy") : mediaText(mediaType, "emptyInitialCopy");
   $("#empty-clear").hidden = !filtered;
   $("#empty-state").hidden = state.mediaItems.length > 0;
   grid.hidden = state.mediaItems.length === 0;
   grid.innerHTML = state.mediaItems.map((asset) => `
-    <button class="photo-card media-card ${asset.availabilityStatus && asset.availabilityStatus !== "available" && asset.availabilityStatus !== "unknown" ? "unavailable" : ""}" data-media-id="${escapeAttr(asset.id)}" aria-label="查看 ${escapeAttr(asset.title)}">
+    <button class="photo-card media-card ${asset.availabilityStatus && asset.availabilityStatus !== "available" && asset.availabilityStatus !== "unknown" ? "unavailable" : ""}" data-media-id="${escapeAttr(asset.id)}" aria-label="${escapeAttr(mediaText(mediaType, "view", { title: asset.title }))}">
       <img src="${escapeAttr(asset.thumbnailUrl)}" alt="" loading="lazy" decoding="async">
-      <span class="media-kind">${state.mediaType === "videos" ? "▶" : "♪"}</span>
+      <span class="media-kind">${mediaType === "videos" ? "▶" : "♪"}</span>
       <span class="card-badge">${escapeHTML(availabilityLabel(asset.availabilityStatus) || formatDuration(asset.durationMs))}</span>
       <span class="card-copy"><h3>${escapeHTML(asset.title)}</h3><p>${escapeHTML(asset.project)} · ${asset.year} · ${escapeHTML(asset.codec)}</p></span>
     </button>`).join("");
@@ -305,7 +324,7 @@ function selectMedia(mediaType) {
 
 function applyMediaUI({ syncURL }) {
   const config = mediaConfig[state.mediaType];
-  $("#sort-label").textContent = state.mediaType === "photos" ? "拍攝日期（新到舊）" : "錄製日期（新到舊）";
+  $("#sort-label").textContent = t(state.mediaType === "photos" ? "media.sort.photo" : "media.sort.recording");
   $$("[data-media]").forEach((button) => {
     const selected = button.dataset.media === state.mediaType;
     button.classList.toggle("active", selected);
@@ -314,21 +333,21 @@ function applyMediaUI({ syncURL }) {
   });
   $("#media-panel").setAttribute("aria-labelledby", `${state.mediaType}-tab`);
   $("#media-eyebrow").textContent = config.eyebrow;
-  $("#media-title").textContent = config.title;
-  $("#all-media-label").textContent = config.title;
-  $("#year-filter-label").textContent = config.yearLabel;
-  $("#search").placeholder = config.searchPlaceholder;
-  $("#search").setAttribute("aria-label", `搜尋${config.label}`);
+  $("#media-title").textContent = mediaText(state.mediaType, "all");
+  $("#all-media-label").textContent = mediaText(state.mediaType, "all");
+  $("#year-filter-label").textContent = mediaText(state.mediaType, "year");
+  $("#search").placeholder = mediaText(state.mediaType, "searchPlaceholder");
+  $("#search").setAttribute("aria-label", mediaText(state.mediaType, "searchAria"));
   $("#search").disabled = false;
   $("#media-actions").hidden = false;
   $("#open-folders").disabled = false;
-  $("#open-folders").title = `以年份、專題、Tags${state.mediaType === "photos" ? "與器材" : "與 Codec"}瀏覽${config.label}`;
+  $("#open-folders").title = t(`nav.folderTitle.${state.mediaType}`);
   $$("[data-indexed-filter]").forEach((section) => { section.hidden = false; });
   $("#photo-metadata-filters").hidden = state.mediaType !== "photos";
   $("#media-metadata-filters").hidden = state.mediaType === "photos";
   $("#media-filter-note").hidden = true;
   $("#all-count").textContent = state.mediaType === "photos" && state.total
-    ? new Intl.NumberFormat("zh-TW").format(state.total)
+    ? formatNumber(state.total)
     : state.mediaType === "photos" ? "—" : "0";
   renderFacetsForCurrentMedia();
   updateBatchCopy();
@@ -354,18 +373,18 @@ function onMediaTabKeydown(event) {
 function renderActiveFilters() {
   const f = state.filters;
   const values = [];
-  if (f.q) values.push(["q", `搜尋：${f.q}`]);
+  if (f.q) values.push(["q", t("filters.search", { query: f.q })]);
   if (f.year) values.push(["year", f.year]);
   if (f.project) values.push(["project", f.project]);
   f.tags.forEach((tag) => values.push([`tag:${tag}`, `# ${tag}`]));
   if (f.camera) values.push(["camera", f.camera]);
   if (f.lens) values.push(["lens", f.lens]);
   if (f.minISO || f.maxISO) values.push(["iso", `ISO ${f.minISO || "0"}–${f.maxISO || "∞"}`]);
-  if (f.location) values.push(["location", "有 GeoTag"]);
+  if (f.location) values.push(["location", t("filters.hasGeo")]);
   if (f.codec) values.push(["codec", f.codec]);
-  if (f.duration) values.push(["duration", {short:"5 分鐘內",medium:"5–30 分鐘",long:"30 分鐘以上"}[f.duration]]);
-  if (f.transcript) values.push(["transcript", "有逐字稿"]);
-  $("#active-filters").innerHTML = values.map(([key, label]) => `<span class="active-filter">${escapeHTML(label)}<button data-remove="${escapeAttr(key)}" aria-label="移除 ${escapeAttr(label)}">×</button></span>`).join("");
+  if (f.duration) values.push(["duration", t(`filters.duration.${f.duration}`)]);
+  if (f.transcript) values.push(["transcript", t("filters.hasTranscript")]);
+  $("#active-filters").innerHTML = values.map(([key, label]) => `<span class="active-filter">${escapeHTML(label)}<button data-remove="${escapeAttr(key)}" aria-label="${escapeAttr(t("common.remove", { label }))}">×</button></span>`).join("");
   $("#clear-filters").classList.toggle("visible", values.length > 0);
   $$("[data-remove]", $("#active-filters")).forEach((button) => button.addEventListener("click", () => removeFilter(button.dataset.remove)));
 }
@@ -406,8 +425,8 @@ function openDetail(id) {
   $("#detail-project").textContent = photo.project;
   $("#detail-title").textContent = photo.title;
   $("#detail-date").textContent = formatDate(photo.takenAt);
-  $("#detail-exif").innerHTML = dlItems([["相機", photo.camera], ["鏡頭", photo.lens], ["光圈", photo.aperture], ["快門", photo.shutterSpeed], ["ISO", photo.iso], ["焦距", photo.focalLength]]);
-  $("#detail-file").innerHTML = dlItems([["格式", photo.fileType], ["尺寸", photo.dimensions], ["檔案大小", photo.fileSize], ["年份", photo.year], ["原檔狀態", availabilityLabel(photo.availabilityStatus, true)], ["縮圖狀態", availabilityLabel(photo.thumbnailStatus, true)]]);
+  $("#detail-exif").innerHTML = dlItems([[t("field.camera"), photo.camera], [t("field.lens"), photo.lens], [t("field.aperture"), photo.aperture], [t("field.shutter"), photo.shutterSpeed], ["ISO", photo.iso], [t("field.focalLength"), photo.focalLength]]);
+  $("#detail-file").innerHTML = dlItems([[t("field.format"), photo.fileType], [t("field.dimensions"), photo.dimensions], [t("field.fileSize"), photo.fileSize], [t("field.year"), photo.year], [t("field.originalStatus"), availabilityLabel(photo.availabilityStatus, true)], [t("field.thumbnailStatus"), availabilityLabel(photo.thumbnailStatus, true)]]);
   $("#detail-tags").innerHTML = photo.tags.map((tag) => `<span># ${escapeHTML(tag)}</span>`).join("");
   $("#detail-location-section").hidden = !photo.location;
   if (photo.location) {
@@ -431,28 +450,17 @@ async function showSimilar() {
   const button = $("#similar-button");
   button.disabled = true;
   const oldText = $("strong", button).textContent;
-  $("strong", button).textContent = "正在計算向量距離…";
+  $("strong", button).textContent = t("similar.calculating");
   try {
     const response = await fetch(`/api/v1/photos/${encodeURIComponent(state.selected.id)}/similar?limit=6`);
-    if (!response.ok) throw new Error("相似搜尋失敗");
+    if (!response.ok) throw new Error(t("similar.failed"));
     const data = await response.json();
-    $("#similar-title").textContent = "視覺相似照片";
-    $("#similar-description").textContent = `以「${state.selected.title}」為基準，依 cosine similarity 排序`;
-    $("#similar-grid").innerHTML = data.items.map(({ photo, similarity }) => `
-      <button class="similar-card" data-similar-id="${escapeAttr(photo.id)}">
-        <img src="${escapeAttr(photo.thumbnailUrl)}" alt="" loading="lazy">
-        <span class="similar-copy"><strong>${escapeHTML(photo.title)}</strong><span>${Math.round(similarity * 100)}% 相似</span></span>
-      </button>`).join("");
-    $$("[data-similar-id]", $("#similar-grid")).forEach((card) => card.addEventListener("click", () => {
-      similarDialog.close();
-      const match = data.items.find((item) => item.photo.id === card.dataset.similarId)?.photo;
-      if (match && !state.photos.some((photo) => photo.id === match.id)) state.photos.push(match);
-      openDetail(card.dataset.similarId);
-    }));
+    state.similar = { kind: "photo", source: state.selected, items: data.items };
+    renderSimilarResults();
     dialog.close(); similarDialog.showModal();
   } catch (error) {
     console.error(error);
-    $("strong", button).textContent = "相似搜尋暫時無法使用";
+    $("strong", button).textContent = t("similar.failed");
     setTimeout(() => { $("strong", button).textContent = oldText; }, 1800);
   } finally { button.disabled = false; $("strong", button).textContent = oldText; }
 }
@@ -461,42 +469,44 @@ async function openMediaDetail(id) {
   const mediaType = state.mediaType;
   try {
     const response = await fetch(`/api/v1/${mediaType}/${encodeURIComponent(id)}`);
-    if (!response.ok) throw new Error(`無法讀取${mediaConfig[mediaType].label}詳情`);
+    if (!response.ok) throw new Error(t("media.loadError", { media: mediaText(mediaType, "label") }));
     const asset = await response.json();
     state.selectedMedia = asset;
-    $("#media-detail-project").textContent = asset.project;
-    $("#media-detail-title").textContent = asset.title;
-    $("#media-detail-date").textContent = formatDate(asset.recordedAt);
-    $("#media-detail-info").innerHTML = dlItems([
-      ["長度", formatDuration(asset.durationMs)], ["Codec", asset.codec], ["格式", asset.mimeType],
-      ["尺寸", asset.dimensions], ["取樣率", asset.sampleRate ? `${asset.sampleRate} Hz` : "—"], ["聲道", asset.channels],
-      ["原檔狀態", availabilityLabel(asset.availabilityStatus, true)], ["預覽圖狀態", availabilityLabel(asset.thumbnailStatus, true)],
-    ]);
-    $("#media-detail-tags").innerHTML = (asset.tags || []).map((tag) => `<span># ${escapeHTML(tag)}</span>`).join("");
-    $("#media-detail-transcript").textContent = asset.transcript || "沒有偵測到可辨識的語音。";
-    const visualCount = (asset.segments || []).filter((segment) => segment.segmentType === "visual").length;
-    const audioCount = (asset.segments || []).filter((segment) => segment.segmentType === "audio").length;
-    $("#media-detail-segments").textContent = `視覺片段 ${visualCount} 個 · 聲音片段 ${audioCount} 個`;
-    const video = $("#detail-video");
-    const audioWrap = $("#detail-audio-wrap");
-    if (mediaType === "videos") {
-      audioWrap.hidden = true;
-      video.hidden = false;
-      video.src = asset.mediaUrl;
-      video.load();
-    } else {
-      video.hidden = true;
-      audioWrap.hidden = false;
-      $("#detail-audio-image").src = asset.thumbnailUrl;
-      $("#detail-audio").src = asset.mediaUrl;
-      $("#detail-audio").load();
-    }
-    $("#media-similar-visual").hidden = mediaType !== "videos";
-    $("#media-similar-audio strong").textContent = mediaType === "videos" ? "尋找聲音相似影片" : "尋找聲音相似音訊";
+    renderMediaDetail(asset, mediaType, { loadPlayer: true });
     mediaDialog.showModal();
   } catch (error) {
     console.error(error);
   }
+}
+
+function renderMediaDetail(asset, mediaType, { loadPlayer = false } = {}) {
+  $("#media-detail-project").textContent = asset.project;
+  $("#media-detail-title").textContent = asset.title;
+  $("#media-detail-date").textContent = formatDate(asset.recordedAt);
+  $("#media-detail-info").innerHTML = dlItems([
+    [t("field.duration"), formatDuration(asset.durationMs)], ["Codec", asset.codec], [t("field.format"), asset.mimeType],
+    [t("field.dimensions"), asset.dimensions], [t("field.sampleRate"), asset.sampleRate ? `${formatNumber(asset.sampleRate)} Hz` : "—"], [t("field.channels"), asset.channels],
+    [t("field.originalStatus"), availabilityLabel(asset.availabilityStatus, true)], [t("field.previewStatus"), availabilityLabel(asset.thumbnailStatus, true)],
+  ]);
+  $("#media-detail-tags").innerHTML = (asset.tags || []).map((tag) => `<span># ${escapeHTML(tag)}</span>`).join("");
+  $("#media-detail-transcript").textContent = asset.transcript || t("media.noTranscript");
+  const visualCount = (asset.segments || []).filter((segment) => segment.segmentType === "visual").length;
+  const audioCount = (asset.segments || []).filter((segment) => segment.segmentType === "audio").length;
+  $("#media-detail-segments").textContent = t("media.segmentSummary", { visual: formatNumber(visualCount), audio: formatNumber(audioCount) });
+  const video = $("#detail-video");
+  const audioWrap = $("#detail-audio-wrap");
+  if (mediaType === "videos") {
+    audioWrap.hidden = true;
+    video.hidden = false;
+    if (loadPlayer) { video.src = asset.mediaUrl; video.load(); }
+  } else {
+    video.hidden = true;
+    audioWrap.hidden = false;
+    $("#detail-audio-image").src = asset.thumbnailUrl;
+    if (loadPlayer) { $("#detail-audio").src = asset.mediaUrl; $("#detail-audio").load(); }
+  }
+  $("#media-similar-visual").hidden = mediaType !== "videos";
+  $("#media-similar-audio strong").textContent = t(mediaType === "videos" ? "similar.audioVideoAction" : "similar.audioAudioAction");
 }
 
 async function showSimilarMedia(modality) {
@@ -506,22 +516,10 @@ async function showSimilarMedia(modality) {
   button.disabled = true;
   try {
     const response = await fetch(`/api/v1/${state.mediaType}/${encodeURIComponent(asset.id)}/similar?modality=${modality}&limit=6`);
-    if (!response.ok) throw new Error("相似搜尋失敗");
+    if (!response.ok) throw new Error(t("similar.failed"));
     const data = await response.json();
-    const kind = modality === "visual" ? "畫面" : "聲音";
-    $("#similar-title").textContent = `${kind}相似${mediaConfig[state.mediaType].label}`;
-    $("#similar-description").textContent = `以「${asset.title}」為基準，依 ${modality === "visual" ? "OpenCLIP" : "CLAP"} cosine similarity 排序`;
-    $("#similar-grid").innerHTML = data.items.length ? data.items.map(({ asset: match, similarity }) => `
-      <button class="similar-card" data-similar-media-id="${escapeAttr(match.id)}">
-        <img src="${escapeAttr(match.thumbnailUrl)}" alt="" loading="lazy">
-        <span class="similar-copy"><strong>${escapeHTML(match.title)}</strong><span>${Math.round(similarity * 100)}% 相似</span></span>
-      </button>`).join("") : `<div class="empty-state"><h2>目前沒有其他可比較的${mediaConfig[state.mediaType].label}</h2><p>再匯入一些內容後即可計算向量距離。</p></div>`;
-    $$('[data-similar-media-id]', $("#similar-grid")).forEach((card) => card.addEventListener("click", () => {
-      const match = data.items.find((item) => item.asset.id === card.dataset.similarMediaId)?.asset;
-      if (match && !state.mediaItems.some((item) => item.id === match.id)) state.mediaItems.push(match);
-      similarDialog.close();
-      openMediaDetail(card.dataset.similarMediaId);
-    }));
+    state.similar = { kind: "media", modality, mediaType: state.mediaType, source: asset, items: data.items };
+    renderSimilarResults();
     closeMediaDialog();
     similarDialog.showModal();
   } catch (error) {
@@ -529,6 +527,40 @@ async function showSimilarMedia(modality) {
   } finally {
     button.disabled = false;
   }
+}
+
+function renderSimilarResults() {
+  const similar = state.similar;
+  if (!similar) return;
+  if (similar.kind === "photo") {
+    $("#similar-title").textContent = t("similar.photoTitle");
+    $("#similar-description").textContent = t("similar.description", { title: similar.source.title, model: "pgvector" });
+    $("#similar-grid").innerHTML = similar.items.map(({ photo, similarity }) => `
+      <button class="similar-card" data-similar-id="${escapeAttr(photo.id)}">
+        <img src="${escapeAttr(photo.thumbnailUrl)}" alt="" loading="lazy">
+        <span class="similar-copy"><strong>${escapeHTML(photo.title)}</strong><span>${escapeHTML(t("similar.score", { score: formatNumber(Math.round(similarity * 100)) }))}</span></span>
+      </button>`).join("");
+    $$("[data-similar-id]", $("#similar-grid")).forEach((card) => card.addEventListener("click", () => {
+      similarDialog.close();
+      const match = similar.items.find((item) => item.photo.id === card.dataset.similarId)?.photo;
+      if (match && !state.photos.some((photo) => photo.id === match.id)) state.photos.push(match);
+      openDetail(card.dataset.similarId);
+    }));
+    return;
+  }
+  $("#similar-title").textContent = t(`similar.${similar.modality}Title.${similar.mediaType}`);
+  $("#similar-description").textContent = t("similar.description", { title: similar.source.title, model: similar.modality === "visual" ? "OpenCLIP" : "CLAP" });
+  $("#similar-grid").innerHTML = similar.items.length ? similar.items.map(({ asset: match, similarity }) => `
+    <button class="similar-card" data-similar-media-id="${escapeAttr(match.id)}">
+      <img src="${escapeAttr(match.thumbnailUrl)}" alt="" loading="lazy">
+      <span class="similar-copy"><strong>${escapeHTML(match.title)}</strong><span>${escapeHTML(t("similar.score", { score: formatNumber(Math.round(similarity * 100)) }))}</span></span>
+    </button>`).join("") : `<div class="empty-state"><h2>${escapeHTML(t("similar.noComparable", { media: mediaText(similar.mediaType, "label") }))}</h2><p>${escapeHTML(t("similar.noComparableCopy"))}</p></div>`;
+  $$('[data-similar-media-id]', $("#similar-grid")).forEach((card) => card.addEventListener("click", () => {
+    const match = similar.items.find((item) => item.asset.id === card.dataset.similarMediaId)?.asset;
+    if (match && !state.mediaItems.some((item) => item.id === match.id)) state.mediaItems.push(match);
+    similarDialog.close();
+    openMediaDetail(card.dataset.similarMediaId);
+  }));
 }
 
 function closeMediaDialog() {
@@ -546,16 +578,15 @@ function formatDuration(milliseconds) {
 }
 
 function availabilityLabel(status, includeAvailable = false) {
-  const labels = { available: "可使用", missing: "找不到檔案", volume_offline: "磁碟離線", unknown: "尚未確認" };
-  return status === "available" && !includeAvailable ? "" : (labels[status] || "");
+  return status === "available" && !includeAvailable ? "" : (status ? t(`status.${status}`) : "");
 }
 
 function updateBatchCopy() {
-  const config = mediaConfig[state.mediaType];
-  $("#batch-title").textContent = `批次整理${config.label}`;
-  $("#batch-source-label").textContent = `${config.label}資料夾或 Volume 路徑`;
-  $("#batch-auto-label").textContent = state.mediaType === "photos" ? "使用 OpenCLIP 自動加 Tags" : state.mediaType === "videos" ? "使用 OpenCLIP 與 CLAP 自動加 Tags" : "使用 CLAP 自動加 Tags";
-  $("#batch-copy").textContent = state.mediaType === "photos" ? "工作會在本機依序執行；關閉視窗不會中止。" : "本機會依序建立片段、逐字稿、向量與 Tags；關閉視窗不會中止。";
+  const media = mediaText(state.mediaType, "label");
+  $("#batch-title").textContent = t("batch.title", { media });
+  $("#batch-source-label").textContent = t("batch.source", { media });
+  $("#batch-auto-label").textContent = t(`batch.auto.${state.mediaType}`);
+  $("#batch-copy").textContent = t(state.mediaType === "photos" ? "batch.copy.photos" : "batch.copy.media");
 }
 
 function dlItems(items) {
@@ -563,7 +594,7 @@ function dlItems(items) {
 }
 
 function formatDate(value) {
-  return new Intl.DateTimeFormat("zh-TW", { year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+  return formatLocalizedDate(value);
 }
 
 function openSidebar() { $("#filter-panel").classList.add("open"); $("#sidebar-scrim").classList.add("visible"); }
@@ -574,10 +605,10 @@ function escapeAttr(value) { return escapeHTML(value).replaceAll('"', "&quot;");
 async function openFolderBrowser() {
   const folderDialog = $("#folder-dialog");
   if (!folderDialog.open) folderDialog.showModal();
-  $("#folder-sources").innerHTML = `<p class="finder-hint">正在讀取資料夾…</p>`;
+  $("#folder-sources").innerHTML = `<p class="finder-hint">${escapeHTML(t("folder.loading"))}</p>`;
   try {
     const response = await fetch(`/api/v1/folders?media=${encodeURIComponent(state.mediaType)}`);
-    if (!response.ok) throw new Error("資料夾讀取失敗");
+    if (!response.ok) throw new Error(t("folder.loadError"));
     state.folderTree = await response.json();
     renderFolderSources();
   } catch (error) {
@@ -588,8 +619,8 @@ async function openFolderBrowser() {
 function renderFolderSources() {
   const icon = `<svg viewBox="0 0 24 24"><path d="M3 19V8a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9H3Z"/></svg>`;
   const sources = [...state.folderTree.sources];
-  if (state.folderTree.collections?.length) sources.push({ id: "collections", name: "我的資料夾", kind: "collections", children: state.folderTree.collections });
-  $("#folder-sources").innerHTML = sources.map((source) => `<button class="finder-row" data-folder-source="${escapeAttr(source.id)}">${icon}<b>${escapeHTML(source.name)}</b><span>›</span></button>`).join("");
+  if (state.folderTree.collections?.length) sources.push({ id: "collections", name: t("folder.myFolders"), kind: "collections", children: state.folderTree.collections });
+  $("#folder-sources").innerHTML = sources.map((source) => `<button class="finder-row ${source.id === state.selectedFolderSource?.id ? "active" : ""}" data-folder-source="${escapeAttr(source.id)}">${icon}<b>${escapeHTML(folderSourceName(source))}</b><span>›</span></button>`).join("");
   $$("[data-folder-source]").forEach((button) => button.addEventListener("click", () => {
     $$("[data-folder-source]").forEach((item) => item.classList.toggle("active", item === button));
     const source = sources.find((item) => item.id === button.dataset.folderSource);
@@ -598,8 +629,9 @@ function renderFolderSources() {
 }
 
 function renderFolderChildren(source) {
+  state.selectedFolderSource = source;
   const children = source.children || [];
-  $("#folder-children").innerHTML = children.length ? children.map((item) => `<button class="finder-row" data-folder-child="${escapeAttr(item.id)}"><svg viewBox="0 0 24 24"><path d="M3 19V8a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9H3Z"/></svg><b>${escapeHTML(item.name)}</b><span>${item.count ?? ""}</span></button>`).join("") : `<p class="finder-hint">這裡還沒有資料夾</p>`;
+  $("#folder-children").innerHTML = children.length ? children.map((item) => `<button class="finder-row" data-folder-child="${escapeAttr(item.id)}"><svg viewBox="0 0 24 24"><path d="M3 19V8a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9H3Z"/></svg><b>${escapeHTML(item.name)}</b><span>${item.count == null ? "" : formatNumber(item.count)}</span></button>`).join("") : `<p class="finder-hint">${escapeHTML(t("folder.empty"))}</p>`;
   $$("[data-folder-child]").forEach((button) => button.addEventListener("click", () => {
     $$("[data-folder-child]").forEach((item) => item.classList.toggle("active", item === button));
     const item = children.find((child) => child.id === button.dataset.folderChild);
@@ -608,10 +640,21 @@ function renderFolderChildren(source) {
   }));
 }
 
+function folderSourceName(source) {
+  if (source.id === "years") return mediaText(state.mediaType, "year");
+  if (source.id === "projects") return t("filters.project");
+  if (source.id === "tags") return t("filters.tags");
+  if (source.id === "cameras") return t("filters.camera");
+  if (source.id === "lenses") return t("filters.lens");
+  if (source.id === "codecs") return t("filters.codec");
+  return source.name;
+}
+
 function renderFolderPreview(folder) {
   const isManual = folder.kind === "manual";
-  const config = mediaConfig[state.mediaType];
-  $("#folder-preview").innerHTML = `<div class="folder-glyph"><svg viewBox="0 0 48 48"><path d="M5 39V13a4 4 0 0 1 4-4h10l5 5h15a4 4 0 0 1 4 4v21H5Z"/></svg></div><h3>${escapeHTML(folder.name)}</h3><p>${isManual ? "手動收藏的照片，不影響檔案實際位置。" : `這是由資料庫條件即時產生的智慧資料夾${folder.count != null ? `，包含 ${folder.count} ${config.unit}${config.label}` : ""}。`}</p><button id="browse-selected-folder">瀏覽${config.label}</button>`;
+  const count = folder.count == null ? null : mediaText(state.mediaType, "count", { count: formatNumber(folder.count) });
+  const copy = isManual ? t("folder.manualCopy") : count ? t("folder.smartCopyCount", { count }) : t("folder.smartCopy");
+  $("#folder-preview").innerHTML = `<div class="folder-glyph"><svg viewBox="0 0 48 48"><path d="M5 39V13a4 4 0 0 1 4-4h10l5 5h15a4 4 0 0 1 4 4v21H5Z"/></svg></div><h3>${escapeHTML(folder.name)}</h3><p>${escapeHTML(copy)}</p><button id="browse-selected-folder">${escapeHTML(t("folder.browse", { media: mediaText(state.mediaType, "label") }))}</button>`;
   $("#browse-selected-folder").addEventListener("click", () => browseFolder(folder));
 }
 
@@ -624,7 +667,7 @@ async function browseFolder(folder) {
     const page = await response.json();
     state.photos = page.items || []; state.total = page.total || 0;
     renderPhotos();
-    $("#result-summary").textContent = `${folder.name} · ${state.total} 張照片`;
+    $("#result-summary").textContent = t("folder.result", { name: folder.name, count: mediaText("photos", "count", { count: formatNumber(state.total) }) });
     return;
   }
   clearFilters(false);
@@ -653,17 +696,17 @@ async function submitBatch(event) {
     recursive: form.get("recursive") === "on", autoTags: form.get("autoTags") === "on",
     mediaTypes: [mediaConfig[state.mediaType].singular],
   };
-  const submit = $(".batch-submit"); submit.disabled = true; submit.firstChild.textContent = "正在建立工作… ";
+  const submit = $(".batch-submit"); submit.disabled = true; $(".batch-submit-label", submit).textContent = t("batch.creating");
   try {
     const response = await fetch("/api/v1/batch-jobs", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "無法建立批次工作");
+    if (!response.ok) throw new Error(data.error || t("batch.createError"));
     state.batchJobID = data.id;
     $("#batch-form").hidden = true; $("#batch-progress").hidden = false;
     updateBatchProgress(data); followBatch(data.id);
   } catch (error) {
     alert(error.message);
-  } finally { submit.disabled = false; submit.firstChild.textContent = "建立批次工作 "; }
+  } finally { submit.disabled = false; $(".batch-submit-label", submit).textContent = t("batch.create"); }
 }
 
 function followBatch(id) {
@@ -685,17 +728,17 @@ async function pollBatch(id) {
 }
 
 function updateBatchProgress(job) {
-  const labels = {pending:"等待處理",scanning:"掃描媒體檔案",running:"建立縮圖、片段、逐字稿與向量",completed:"處理完成",completed_with_errors:"完成，部分檔案失敗",failed:"工作失敗",cancelled:"已停止"};
+  state.batchJob = job;
   const percent = job.discoveredCount ? Math.round(job.processedCount / job.discoveredCount * 100) : 0;
-  $("#batch-status").textContent = labels[job.status] || job.status; $("#batch-percent").textContent = `${percent}%`;
-  $("#batch-progress-bar").style.width = `${percent}%`; $("#batch-discovered").textContent = job.discoveredCount;
-  $("#batch-success").textContent = job.succeededCount; $("#batch-failed").textContent = job.failedCount;
-  $("#batch-current").textContent = job.error || job.currentPath || (job.status === "pending" ? "工作已存入 PostgreSQL queue" : "");
+  $("#batch-status").textContent = t(`batch.status.${job.status}`); $("#batch-percent").textContent = `${formatNumber(percent)}%`;
+  $("#batch-progress-bar").style.width = `${percent}%`; $("#batch-discovered").textContent = formatNumber(job.discoveredCount);
+  $("#batch-success").textContent = formatNumber(job.succeededCount); $("#batch-failed").textContent = formatNumber(job.failedCount);
+  $("#batch-current").textContent = job.error || job.currentPath || (job.status === "pending" ? t("batch.queue") : "");
   $("#batch-cancel").hidden = ["completed","completed_with_errors","failed","cancelled"].includes(job.status);
 }
 
 async function cancelBatch() {
   if (!state.batchJobID) return;
   await fetch(`/api/v1/batch-jobs/${encodeURIComponent(state.batchJobID)}/cancel`, {method:"POST"});
-  $("#batch-cancel").disabled = true; $("#batch-cancel").textContent = "正在停止…";
+  $("#batch-cancel").disabled = true; $("#batch-cancel").textContent = t("batch.cancelling");
 }

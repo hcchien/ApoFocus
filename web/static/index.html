@@ -10,25 +10,25 @@
 </head>
 <body>
   <div class="app-shell">
-    <aside class="sidebar" id="filter-panel" aria-label="媒體篩選">
+    <aside class="sidebar" id="filter-panel" aria-label="媒體篩選" data-i18n-aria-label="nav.filters">
       <div class="brand-row">
-        <a class="brand" href="/" aria-label="ApoFocus 首頁">
+        <a class="brand" href="/" aria-label="ApoFocus 首頁" data-i18n-aria-label="nav.home">
           <svg viewBox="0 0 36 36" aria-hidden="true"><path d="M7 7h7v3H10v4H7V7Zm15 0h7v7h-3v-4h-4V7ZM7 22h3v4h4v3H7v-7Zm19 0h3v7h-7v-3h4v-4Z"/><circle cx="18" cy="18" r="5"/></svg>
           <span>apo<em>focus</em></span>
         </a>
-        <button class="icon-button sidebar-close" id="close-filters" aria-label="關閉篩選">
+        <button class="icon-button sidebar-close" id="close-filters" aria-label="關閉篩選" data-i18n-aria-label="nav.closeFilters">
           <svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg>
         </button>
       </div>
 
-      <nav class="primary-nav" aria-label="主要功能">
+      <nav class="primary-nav" aria-label="主要功能" data-i18n-aria-label="nav.primary">
         <button class="nav-item active"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span id="all-media-label">全部照片</span><span class="nav-count" id="all-count">—</span></button>
-        <button class="nav-item" id="open-folders"><svg viewBox="0 0 24 24"><path d="M4 19.5V8.8a2 2 0 0 1 2-2h4l2-2h6a2 2 0 0 1 2 2v12.7"/><path d="M3 19.5h18"/></svg><span>資料夾瀏覽</span></button>
-        <button class="nav-item"><svg viewBox="0 0 24 24"><path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9L12 3Z"/></svg><span>精選</span></button>
+        <button class="nav-item" id="open-folders"><svg viewBox="0 0 24 24"><path d="M4 19.5V8.8a2 2 0 0 1 2-2h4l2-2h6a2 2 0 0 1 2 2v12.7"/><path d="M3 19.5h18"/></svg><span data-i18n="nav.folders">資料夾瀏覽</span></button>
+        <button class="nav-item"><svg viewBox="0 0 24 24"><path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9L12 3Z"/></svg><span data-i18n="nav.featured">精選</span></button>
       </nav>
 
       <div class="sidebar-divider"></div>
-      <div class="filter-heading"><span>篩選條件</span><button id="clear-filters">清除</button></div>
+      <div class="filter-heading"><span data-i18n="filters.heading">篩選條件</span><button id="clear-filters" data-i18n="common.clear">清除</button></div>
 
       <section class="filter-section" data-indexed-filter>
         <button class="section-toggle" aria-expanded="true"><span id="year-filter-label">拍照年份</span><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
@@ -36,42 +36,42 @@
       </section>
 
       <section class="filter-section" data-indexed-filter>
-        <button class="section-toggle" aria-expanded="true"><span>專題</span><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
+        <button class="section-toggle" aria-expanded="true"><span data-i18n="filters.project">專題</span><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
         <div class="section-content project-list" id="project-filters"><div class="facet-skeleton"></div><div class="facet-skeleton small"></div></div>
       </section>
 
       <section class="filter-section" data-indexed-filter>
-        <button class="section-toggle" aria-expanded="true"><span>標籤</span><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
+        <button class="section-toggle" aria-expanded="true"><span data-i18n="filters.tags">標籤</span><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
         <div class="section-content tag-cloud" id="tag-filters"><div class="facet-skeleton"></div></div>
       </section>
 
       <section class="filter-section" data-indexed-filter id="photo-metadata-filters">
         <button class="section-toggle" aria-expanded="false"><span>Meta Data</span><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
         <div class="section-content meta-filters" hidden>
-          <label>相機<select id="camera-filter"><option value="">所有相機</option></select></label>
-          <label>鏡頭<select id="lens-filter"><option value="">所有鏡頭</option></select></label>
-          <div class="field-label">ISO 範圍</div>
-          <div class="range-row"><input id="min-iso" type="number" min="0" placeholder="最低"><span>—</span><input id="max-iso" type="number" min="0" placeholder="最高"></div>
-          <label class="check-row"><input id="location-filter" type="checkbox"><span class="fake-check"><svg viewBox="0 0 16 16"><path d="m3 8 3 3 7-7"/></svg></span><span>只顯示有 GeoTag</span></label>
+          <label><span data-i18n="filters.camera">相機</span><select id="camera-filter"><option value="" data-i18n="filters.allCameras">所有相機</option></select></label>
+          <label><span data-i18n="filters.lens">鏡頭</span><select id="lens-filter"><option value="" data-i18n="filters.allLenses">所有鏡頭</option></select></label>
+          <div class="field-label" data-i18n="filters.isoRange">ISO 範圍</div>
+          <div class="range-row"><input id="min-iso" type="number" min="0" placeholder="最低" data-i18n-placeholder="filters.minimum"><span>—</span><input id="max-iso" type="number" min="0" placeholder="最高" data-i18n-placeholder="filters.maximum"></div>
+          <label class="check-row"><input id="location-filter" type="checkbox"><span class="fake-check"><svg viewBox="0 0 16 16"><path d="m3 8 3 3 7-7"/></svg></span><span data-i18n="filters.geoOnly">只顯示有 GeoTag</span></label>
         </div>
       </section>
       <section class="filter-section" id="media-metadata-filters" hidden>
         <button class="section-toggle" aria-expanded="true"><span>Media Data</span><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
         <div class="section-content meta-filters">
-          <label>Codec<select id="codec-filter"><option value="">所有 Codec</option></select></label>
-          <label>長度<select id="duration-filter"><option value="">所有長度</option><option value="short">5 分鐘內</option><option value="medium">5–30 分鐘</option><option value="long">30 分鐘以上</option></select></label>
-          <label class="check-row"><input id="transcript-filter" type="checkbox"><span class="fake-check"><svg viewBox="0 0 16 16"><path d="m3 8 3 3 7-7"/></svg></span><span>只顯示有逐字稿</span></label>
+          <label><span data-i18n="filters.codec">Codec</span><select id="codec-filter"><option value="" data-i18n="filters.allCodecs">所有 Codec</option></select></label>
+          <label><span data-i18n="filters.duration">長度</span><select id="duration-filter"><option value="" data-i18n="filters.allDurations">所有長度</option><option value="short" data-i18n="filters.duration.short">5 分鐘內</option><option value="medium" data-i18n="filters.duration.medium">5–30 分鐘</option><option value="long" data-i18n="filters.duration.long">30 分鐘以上</option></select></label>
+          <label class="check-row"><input id="transcript-filter" type="checkbox"><span class="fake-check"><svg viewBox="0 0 16 16"><path d="m3 8 3 3 7-7"/></svg></span><span data-i18n="filters.transcriptOnly">只顯示有逐字稿</span></label>
         </div>
       </section>
       <p class="media-filter-note" id="media-filter-note" hidden></p>
-      <div class="sidebar-footer"><span class="storage-label">資料庫容量</span><span>186.4 GB / 1 TB</span><div class="storage-track"><i></i></div></div>
+      <div class="sidebar-footer"><span class="storage-label" data-i18n="storage.capacity">資料庫容量</span><span>186.4 GB / 1 TB</span><div class="storage-track"><i></i></div></div>
     </aside>
 
     <div class="sidebar-scrim" id="sidebar-scrim"></div>
 
     <main class="main-content">
       <header class="topbar">
-        <button class="icon-button mobile-filter" id="open-filters" aria-label="開啟篩選">
+        <button class="icon-button mobile-filter" id="open-filters" aria-label="開啟篩選" data-i18n-aria-label="topbar.openFilters">
           <svg viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
         </button>
         <div class="search-wrap">
@@ -80,103 +80,105 @@
           <kbd>⌘ K</kbd>
         </div>
         <div class="topbar-actions">
-          <button class="icon-button" title="通知" aria-label="通知"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg><i class="status-dot"></i></button>
-          <button class="profile-button"><span class="avatar">HC</span><span class="profile-copy"><strong>H.C. Chien</strong><small>攝影資料庫</small></span><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
+          <label class="locale-control"><span class="visually-hidden" data-i18n="language.label">語言</span><select id="locale-select" aria-label="語言" data-i18n-aria-label="language.label"><option value="zh-TW">繁體中文</option><option value="en">English</option><option value="de">Deutsch</option></select></label>
+          <button class="icon-button" title="通知" aria-label="通知" data-i18n-title="topbar.notifications" data-i18n-aria-label="topbar.notifications"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg><i class="status-dot"></i></button>
+          <button class="profile-button"><span class="avatar">HC</span><span class="profile-copy"><strong>H.C. Chien</strong><small data-i18n="topbar.profile">攝影資料庫</small></span><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
         </div>
       </header>
 
       <div class="workspace">
-        <nav class="media-tabs" role="tablist" aria-label="媒體類型">
-          <button class="media-tab active" id="photos-tab" role="tab" aria-selected="true" aria-controls="media-panel" data-media="photos"><span>Photos</span><small id="photos-tab-count">—</small></button>
-          <button class="media-tab" id="videos-tab" role="tab" aria-selected="false" aria-controls="media-panel" data-media="videos"><span>Videos</span><small id="videos-tab-count">0</small></button>
-          <button class="media-tab" id="audios-tab" role="tab" aria-selected="false" aria-controls="media-panel" data-media="audios"><span>Audios</span><small id="audios-tab-count">0</small></button>
+        <nav class="media-tabs" role="tablist" aria-label="媒體類型" data-i18n-aria-label="media.tablist">
+          <button class="media-tab active" id="photos-tab" role="tab" aria-selected="true" aria-controls="media-panel" data-media="photos"><span data-i18n="media.photos.tab">照片</span><small id="photos-tab-count">—</small></button>
+          <button class="media-tab" id="videos-tab" role="tab" aria-selected="false" aria-controls="media-panel" data-media="videos"><span data-i18n="media.videos.tab">影片</span><small id="videos-tab-count">0</small></button>
+          <button class="media-tab" id="audios-tab" role="tab" aria-selected="false" aria-controls="media-panel" data-media="audios"><span data-i18n="media.audios.tab">音訊</span><small id="audios-tab-count">0</small></button>
         </nav>
         <section id="media-panel" role="tabpanel" aria-labelledby="photos-tab">
         <div class="page-head">
-          <div><p class="eyebrow" id="media-eyebrow">PHOTO ARCHIVE</p><h1 id="media-title">全部照片</h1><p class="result-summary" id="result-summary">正在讀取資料庫…</p></div>
+          <div><p class="eyebrow" id="media-eyebrow">PHOTO ARCHIVE</p><h1 id="media-title">全部照片</h1><p class="result-summary" id="result-summary" data-i18n="media.loading">正在讀取資料庫…</p></div>
           <div class="view-actions" id="media-actions">
-            <button class="batch-open-button" id="open-batch"><svg viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 20h16"/></svg>批次匯入</button>
+            <button class="batch-open-button" id="open-batch"><svg viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 20h16"/></svg><span data-i18n="media.batchImport">批次匯入</span></button>
             <button class="sort-button" id="sort-button"><svg viewBox="0 0 24 24"><path d="M8 7h12M4 7h.01M8 12h9M4 12h.01M8 17h6M4 17h.01"/></svg><span id="sort-label">拍攝日期（新到舊）</span></button>
-            <div class="view-switch" aria-label="檢視方式"><button class="active" aria-label="網格檢視"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></button><button aria-label="列表檢視"><svg viewBox="0 0 24 24"><path d="M9 6h12M9 12h12M9 18h12M3 6h.01M3 12h.01M3 18h.01"/></svg></button></div>
+            <div class="view-switch" aria-label="檢視方式" data-i18n-aria-label="media.viewMode"><button class="active" aria-label="網格檢視" data-i18n-aria-label="media.gridView"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></button><button aria-label="列表檢視" data-i18n-aria-label="media.listView"><svg viewBox="0 0 24 24"><path d="M9 6h12M9 12h12M9 18h12M3 6h.01M3 12h.01M3 18h.01"/></svg></button></div>
           </div>
         </div>
         <div class="active-filters" id="active-filters" aria-live="polite"></div>
         <div class="photo-grid" id="photo-grid" aria-live="polite"></div>
-        <div class="empty-state" id="empty-state" hidden><span id="empty-symbol">0</span><h2 id="empty-title">沒有符合條件的照片</h2><p id="empty-copy">試著放寬篩選條件，或換一個搜尋關鍵字。</p><button id="empty-clear">清除所有篩選</button></div>
+        <div class="empty-state" id="empty-state" hidden><span id="empty-symbol">0</span><h2 id="empty-title">沒有符合條件的照片</h2><p id="empty-copy">試著放寬篩選條件，或換一個搜尋關鍵字。</p><button id="empty-clear" data-i18n="media.clearAll">清除所有篩選</button></div>
         </section>
       </div>
     </main>
   </div>
 
   <dialog class="photo-dialog" id="photo-dialog">
-    <button class="dialog-close" id="dialog-close" aria-label="關閉"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+    <button class="dialog-close" id="dialog-close" aria-label="關閉" data-i18n-aria-label="common.close"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
     <div class="detail-layout">
-      <div class="detail-visual"><img id="detail-image" alt=""><div class="detail-nav"><button id="detail-prev" aria-label="上一張">←</button><span id="detail-position"></span><button id="detail-next" aria-label="下一張">→</button></div></div>
+      <div class="detail-visual"><img id="detail-image" alt=""><div class="detail-nav"><button id="detail-prev" aria-label="上一張" data-i18n-aria-label="detail.previous">←</button><span id="detail-position"></span><button id="detail-next" aria-label="下一張" data-i18n-aria-label="detail.next">→</button></div></div>
       <aside class="detail-panel">
         <p class="eyebrow" id="detail-project"></p><h2 id="detail-title"></h2><p class="detail-date" id="detail-date"></p>
-        <button class="similar-button" id="similar-button"><svg viewBox="0 0 24 24"><circle cx="9" cy="9" r="5"/><circle cx="16" cy="15" r="5"/><path d="m4 20 3.5-3.5"/></svg><span><strong>尋找視覺相似照片</strong><small>使用 pgvector 計算影像距離</small></span><i>→</i></button>
-        <div class="detail-section"><h3>拍攝資訊</h3><dl id="detail-exif"></dl></div>
-        <div class="detail-section" id="detail-location-section"><h3>地點</h3><div class="location-card"><svg viewBox="0 0 24 24"><path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg><span><strong id="detail-location"></strong><small id="detail-coordinates"></small></span></div></div>
-        <div class="detail-section"><h3>標籤</h3><div class="detail-tags" id="detail-tags"></div></div>
-        <div class="detail-section"><h3>檔案</h3><dl id="detail-file"></dl></div>
+        <button class="similar-button" id="similar-button"><svg viewBox="0 0 24 24"><circle cx="9" cy="9" r="5"/><circle cx="16" cy="15" r="5"/><path d="m4 20 3.5-3.5"/></svg><span><strong data-i18n="similar.photoAction">尋找視覺相似照片</strong><small data-i18n="similar.photoHint">使用 pgvector 計算影像距離</small></span><i>→</i></button>
+        <div class="detail-section"><h3 data-i18n="detail.photoInfo">拍攝資訊</h3><dl id="detail-exif"></dl></div>
+        <div class="detail-section" id="detail-location-section"><h3 data-i18n="detail.location">地點</h3><div class="location-card"><svg viewBox="0 0 24 24"><path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg><span><strong id="detail-location"></strong><small id="detail-coordinates"></small></span></div></div>
+        <div class="detail-section"><h3 data-i18n="detail.tags">標籤</h3><div class="detail-tags" id="detail-tags"></div></div>
+        <div class="detail-section"><h3 data-i18n="detail.file">檔案</h3><dl id="detail-file"></dl></div>
       </aside>
     </div>
   </dialog>
 
   <dialog class="similar-dialog" id="similar-dialog">
-    <div class="similar-head"><div><p class="eyebrow">VECTOR SEARCH</p><h2 id="similar-title">視覺相似照片</h2><p id="similar-description"></p></div><button class="dialog-close inline" id="similar-close" aria-label="關閉"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+    <div class="similar-head"><div><p class="eyebrow">VECTOR SEARCH</p><h2 id="similar-title" data-i18n="similar.photoTitle">視覺相似照片</h2><p id="similar-description"></p></div><button class="dialog-close inline" id="similar-close" aria-label="關閉" data-i18n-aria-label="common.close"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
     <div class="similar-grid" id="similar-grid"></div>
   </dialog>
 
   <dialog class="photo-dialog" id="media-dialog">
-    <button class="dialog-close" id="media-dialog-close" aria-label="關閉"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+    <button class="dialog-close" id="media-dialog-close" aria-label="關閉" data-i18n-aria-label="common.close"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
     <div class="detail-layout">
       <div class="detail-visual media-player">
         <video id="detail-video" controls preload="metadata" hidden></video>
-        <div class="audio-player" id="detail-audio-wrap" hidden><img id="detail-audio-image" alt="音訊波形"><audio id="detail-audio" controls preload="metadata"></audio></div>
+        <div class="audio-player" id="detail-audio-wrap" hidden><img id="detail-audio-image" alt="音訊波形" data-i18n-alt="media.audioWaveform"><audio id="detail-audio" controls preload="metadata"></audio></div>
       </div>
       <aside class="detail-panel">
         <p class="eyebrow" id="media-detail-project"></p><h2 id="media-detail-title"></h2><p class="detail-date" id="media-detail-date"></p>
         <div class="media-similar-actions">
-          <button class="similar-button compact" id="media-similar-visual"><svg viewBox="0 0 24 24"><circle cx="9" cy="9" r="5"/><circle cx="16" cy="15" r="5"/><path d="m4 20 3.5-3.5"/></svg><span><strong>尋找畫面相似影片</strong><small>OpenCLIP keyframe 距離</small></span><i>→</i></button>
-          <button class="similar-button compact" id="media-similar-audio"><svg viewBox="0 0 24 24"><path d="M5 9v6M9 6v12M13 4v16M17 7v10M21 10v4"/></svg><span><strong>尋找聲音相似內容</strong><small>CLAP 音訊片段距離</small></span><i>→</i></button>
+          <button class="similar-button compact" id="media-similar-visual"><svg viewBox="0 0 24 24"><circle cx="9" cy="9" r="5"/><circle cx="16" cy="15" r="5"/><path d="m4 20 3.5-3.5"/></svg><span><strong data-i18n="similar.visualVideoAction">尋找畫面相似影片</strong><small data-i18n="similar.visualHint">OpenCLIP keyframe 距離</small></span><i>→</i></button>
+          <button class="similar-button compact" id="media-similar-audio"><svg viewBox="0 0 24 24"><path d="M5 9v6M9 6v12M13 4v16M17 7v10M21 10v4"/></svg><span><strong data-i18n="similar.audioContentAction">尋找聲音相似內容</strong><small data-i18n="similar.audioHint">CLAP 音訊片段距離</small></span><i>→</i></button>
         </div>
-        <div class="detail-section"><h3>媒體資訊</h3><dl id="media-detail-info"></dl></div>
-        <div class="detail-section"><h3>標籤</h3><div class="detail-tags" id="media-detail-tags"></div></div>
-        <div class="detail-section transcript-section"><h3>逐字稿</h3><p id="media-detail-transcript"></p></div>
-        <div class="detail-section"><h3>索引片段</h3><p class="segment-summary" id="media-detail-segments"></p></div>
+        <div class="detail-section"><h3 data-i18n="detail.mediaInfo">媒體資訊</h3><dl id="media-detail-info"></dl></div>
+        <div class="detail-section"><h3 data-i18n="detail.tags">標籤</h3><div class="detail-tags" id="media-detail-tags"></div></div>
+        <div class="detail-section transcript-section"><h3 data-i18n="detail.transcript">逐字稿</h3><p id="media-detail-transcript"></p></div>
+        <div class="detail-section"><h3 data-i18n="detail.segments">索引片段</h3><p class="segment-summary" id="media-detail-segments"></p></div>
       </aside>
     </div>
   </dialog>
 
   <dialog class="folder-dialog" id="folder-dialog">
-    <div class="finder-head"><div><p class="eyebrow">LIBRARY BROWSER</p><h2>資料夾瀏覽</h2></div><button class="dialog-close inline" id="folder-close" aria-label="關閉"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+    <div class="finder-head"><div><p class="eyebrow">LIBRARY BROWSER</p><h2 data-i18n="folder.title">資料夾瀏覽</h2></div><button class="dialog-close inline" id="folder-close" aria-label="關閉" data-i18n-aria-label="common.close"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
     <div class="finder-layout">
-      <nav class="finder-column" id="folder-sources" aria-label="資料來源"></nav>
-      <nav class="finder-column" id="folder-children" aria-label="子資料夾"><p class="finder-hint">選擇左側分類</p></nav>
-      <section class="finder-preview" id="folder-preview"><div class="folder-glyph"><svg viewBox="0 0 48 48"><path d="M5 39V13a4 4 0 0 1 4-4h10l5 5h15a4 4 0 0 1 4 4v21H5Z"/></svg></div><h3>選擇資料夾</h3><p>依年份、專題、標籤或器材瀏覽，不會移動實體照片。</p></section>
+      <nav class="finder-column" id="folder-sources" aria-label="資料來源" data-i18n-aria-label="folder.sources"></nav>
+      <nav class="finder-column" id="folder-children" aria-label="子資料夾" data-i18n-aria-label="folder.children"><p class="finder-hint" data-i18n="folder.chooseCategory">選擇左側分類</p></nav>
+      <section class="finder-preview" id="folder-preview"><div class="folder-glyph"><svg viewBox="0 0 48 48"><path d="M5 39V13a4 4 0 0 1 4-4h10l5 5h15a4 4 0 0 1 4 4v21H5Z"/></svg></div><h3 data-i18n="folder.choose">選擇資料夾</h3><p data-i18n="folder.chooseCopy">依年份、專題、標籤或器材瀏覽，不會移動實體照片。</p></section>
     </div>
   </dialog>
 
   <dialog class="batch-dialog" id="batch-dialog">
-    <div class="finder-head"><div><p class="eyebrow">LOCAL BATCH</p><h2 id="batch-title">批次整理照片</h2><p id="batch-copy">工作會在本機依序執行；關閉視窗不會中止。</p></div><button class="dialog-close inline" id="batch-close" aria-label="關閉"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+    <div class="finder-head"><div><p class="eyebrow">LOCAL BATCH</p><h2 id="batch-title">批次整理照片</h2><p id="batch-copy">工作會在本機依序執行；關閉視窗不會中止。</p></div><button class="dialog-close inline" id="batch-close" aria-label="關閉" data-i18n-aria-label="common.close"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
     <form class="batch-form" id="batch-form">
       <label class="wide"><span id="batch-source-label">照片資料夾或 Volume 路徑</span><input name="sourceRoot" required placeholder="/Volumes/PHOTO_DISK/2026"></label>
-      <label>共用專題（可留空）<input name="project" placeholder="例如：島嶼日常"></label>
-      <label>共用 Tags，以逗號分隔<input name="tags" placeholder="紀實, 客戶精選"></label>
-      <label class="check-row"><input name="recursive" type="checkbox" checked><span class="fake-check"><svg viewBox="0 0 16 16"><path d="m3 8 3 3 7-7"/></svg></span><span>包含所有子資料夾</span></label>
+      <label><span data-i18n="batch.project">共用專題（可留空）</span><input name="project" placeholder="例如：島嶼日常" data-i18n-placeholder="batch.projectPlaceholder"></label>
+      <label><span data-i18n="batch.tags">共用 Tags，以逗號分隔</span><input name="tags" placeholder="紀實, 客戶精選" data-i18n-placeholder="batch.tagsPlaceholder"></label>
+      <label class="check-row"><input name="recursive" type="checkbox" checked><span class="fake-check"><svg viewBox="0 0 16 16"><path d="m3 8 3 3 7-7"/></svg></span><span data-i18n="batch.recursive">包含所有子資料夾</span></label>
       <label class="check-row"><input name="autoTags" type="checkbox" checked><span class="fake-check"><svg viewBox="0 0 16 16"><path d="m3 8 3 3 7-7"/></svg></span><span id="batch-auto-label">使用 OpenCLIP 自動加 Tags</span></label>
-      <button class="batch-submit" type="submit">建立批次工作 <span>→</span></button>
+      <button class="batch-submit" type="submit"><span class="batch-submit-label" data-i18n="batch.create">建立批次工作</span> <span>→</span></button>
     </form>
     <section class="batch-progress" id="batch-progress" hidden>
-      <div class="batch-status"><span id="batch-status">等待處理</span><strong id="batch-percent">0%</strong></div>
+      <div class="batch-status"><span id="batch-status" data-i18n="batch.status.pending">等待處理</span><strong id="batch-percent">0%</strong></div>
       <div class="batch-progress-track"><i id="batch-progress-bar"></i></div>
-      <div class="batch-counts"><span>已發現 <strong id="batch-discovered">0</strong></span><span>成功 <strong id="batch-success">0</strong></span><span>失敗 <strong id="batch-failed">0</strong></span></div>
+      <div class="batch-counts"><span><span data-i18n="batch.discovered">已發現</span> <strong id="batch-discovered">0</strong></span><span><span data-i18n="batch.success">成功</span> <strong id="batch-success">0</strong></span><span><span data-i18n="batch.failed">失敗</span> <strong id="batch-failed">0</strong></span></div>
       <p class="batch-current" id="batch-current"></p>
-      <button class="batch-cancel" id="batch-cancel" type="button">要求停止工作</button>
+      <button class="batch-cancel" id="batch-cancel" type="button" data-i18n="batch.cancel">要求停止工作</button>
     </section>
   </dialog>
 
+  <script src="/i18n.js" defer></script>
   <script src="/app.js" defer></script>
 </body>
 </html>
