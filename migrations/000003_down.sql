@@ -1,0 +1,6 @@
+BEGIN;
+DROP TABLE IF EXISTS batch_items;
+DROP TABLE IF EXISTS batch_jobs;
+DROP TABLE IF EXISTS collection_photos;
+DROP TABLE IF EXISTS collections;
+COMMIT;
