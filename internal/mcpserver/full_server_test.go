@@ -1,0 +1,168 @@
+package mcpserver
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/hcchien/apofocus/internal/batch"
+	"github.com/hcchien/apofocus/internal/catalog"
+	"github.com/hcchien/apofocus/internal/folders"
+	"github.com/hcchien/apofocus/internal/ingest"
+	"github.com/hcchien/apofocus/internal/maintenance"
+	"github.com/hcchien/apofocus/internal/mediaingest"
+)
+
+type fakeMediaStore struct{}
+
+func (fakeMediaStore) ListMedia(context.Context, catalog.MediaFilter) (catalog.MediaPage, error) {
+	return catalog.MediaPage{}, nil
+}
+func (fakeMediaStore) GetMedia(context.Context, string, string) (catalog.MediaAsset, error) {
+	return catalog.MediaAsset{}, nil
+}
+func (fakeMediaStore) MediaFacets(context.Context, string) (catalog.MediaFacets, error) {
+	return catalog.MediaFacets{}, nil
+}
+func (fakeMediaStore) SimilarMedia(context.Context, string, string, string, int) ([]catalog.SimilarMedia, error) {
+	return nil, nil
+}
+
+type fakeMediaImporter struct{}
+
+func (fakeMediaImporter) Inspect(context.Context, mediaingest.ImportRequest) (mediaingest.Inspection, error) {
+	return mediaingest.Inspection{}, nil
+}
+func (fakeMediaImporter) Import(context.Context, mediaingest.ImportRequest) (mediaingest.ImportResult, error) {
+	return mediaingest.ImportResult{}, nil
+}
+
+type fakeFolders struct{}
+
+func (fakeFolders) List(context.Context) ([]folders.Collection, error) { return nil, nil }
+func (fakeFolders) Create(_ context.Context, input folders.CreateInput) (folders.Collection, error) {
+	return folders.Collection{ID: "collection", Name: input.Name, Kind: input.Kind}, nil
+}
+func (fakeFolders) AddPhotos(context.Context, string, []string) error  { return nil }
+func (fakeFolders) PhotoIDs(context.Context, string) ([]string, error) { return nil, nil }
+
+type fakeBatchJobs struct{ job batch.Job }
+
+func (f *fakeBatchJobs) Create(context.Context, batch.CreateInput) (batch.Job, error) {
+	return f.job, nil
+}
+func (f *fakeBatchJobs) List(context.Context, string, int) ([]batch.Job, error) {
+	return []batch.Job{f.job}, nil
+}
+func (f *fakeBatchJobs) Get(context.Context, string) (batch.Job, error)           { return f.job, nil }
+func (f *fakeBatchJobs) Items(context.Context, string, int) ([]batch.Item, error) { return nil, nil }
+func (f *fakeBatchJobs) Cancel(context.Context, string) error                     { return nil }
+func (f *fakeBatchJobs) Resume(context.Context, string) (batch.Job, error)        { return f.job, nil }
+
+type fakeMaintenance struct{ report maintenance.HealthReport }
+
+func (f fakeMaintenance) Check(context.Context) (maintenance.HealthReport, error) {
+	return f.report, nil
+}
+func (f fakeMaintenance) Repair(_ context.Context, service string) (maintenance.RepairResult, error) {
+	return maintenance.RepairResult{Service: service, Label: "com.apofocus." + service, Action: "restart", Succeeded: true}, nil
+}
+
+func TestFullServerAdvertisesCompleteToolset(t *testing.T) {
+	ctx := context.Background()
+	inbox, library := t.TempDir(), t.TempDir()
+	manager, err := ingest.NewManager(library, []string{inbox}, noOpAnalyzer{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	jobs := &fakeBatchJobs{job: batch.Job{ID: "job", SourceRoot: inbox, Status: "running", DiscoveredCount: 10, ProcessedCount: 4, CreatedAt: now, HeartbeatAt: &now}}
+	health := maintenance.HealthReport{Status: maintenance.StatusHealthy, Database: maintenance.ComponentHealth{Status: maintenance.StatusHealthy}, Web: maintenance.ComponentHealth{Status: maintenance.StatusHealthy}, Embedding: maintenance.ComponentHealth{Status: maintenance.StatusHealthy}, Worker: maintenance.WorkerHealth{Status: maintenance.StatusHealthy}}
+	server := NewWithOptions(Options{
+		PhotoImporter: manager, MediaImporter: fakeMediaImporter{}, Photos: catalog.NewMemoryStore(), Media: fakeMediaStore{},
+		Folders: fakeFolders{}, BatchJobs: jobs, Maintenance: fakeMaintenance{report: health}, ImportRoots: []string{inbox}, LibraryRoot: library,
+	})
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v1"}, nil)
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	serverSession, err := server.Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer serverSession.Close()
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clientSession.Close()
+
+	tools, err := clientSession.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wanted := []string{"get_photo_import_policy", "inspect_photo", "import_photo", "search_photos", "get_photo", "find_similar_photos", "search_media", "get_media", "find_similar_media", "inspect_media", "import_media", "browse_folders", "create_collection", "add_photos_to_collection", "get_collection_photos", "create_batch_job", "get_batch_job", "list_batch_jobs", "wait_batch_job", "list_batch_items", "cancel_batch_job", "resume_batch_job", "get_system_health", "diagnose_batch_job", "repair_managed_service"}
+	seen := map[string]bool{}
+	for _, tool := range tools.Tools {
+		seen[tool.Name] = true
+		if tool.InputSchema == nil {
+			t.Errorf("%s has no input schema", tool.Name)
+		}
+	}
+	if len(tools.Tools) != len(wanted) {
+		t.Fatalf("expected %d tools, got %d", len(wanted), len(tools.Tools))
+	}
+	for _, name := range wanted {
+		if !seen[name] {
+			t.Errorf("missing tool %s", name)
+		}
+	}
+
+	result, err := clientSession.CallTool(ctx, &mcp.CallToolParams{Name: "get_batch_job", Arguments: map[string]any{"job_id": "job", "locale": "de"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		t.Fatalf("get_batch_job returned an error: %+v", result.Content)
+	}
+	result, err = clientSession.CallTool(ctx, &mcp.CallToolParams{Name: "diagnose_batch_job", Arguments: map[string]any{"job_id": "job", "locale": "zh-TW"}})
+	if err != nil || result.IsError {
+		t.Fatalf("diagnose_batch_job failed: err=%v result=%+v", err, result)
+	}
+}
+
+func TestBatchStatusIncludesLocalizedRecoveryGuidance(t *testing.T) {
+	failed := batchStatus(batch.Job{Status: "completed_with_errors", DiscoveredCount: 10, ProcessedCount: 10}, "zh-TW", true)
+	if failed.StatusLabel != "完成，部分檔案失敗" || failed.Recovery != "manual_resume_available" || failed.ProgressPercent != 100 {
+		t.Fatalf("unexpected localized failed status: %+v", failed)
+	}
+	running := batchStatus(batch.Job{Status: "running", DiscoveredCount: 10, ProcessedCount: 4}, "de-DE", false)
+	if running.StatusLabel != "Wird verarbeitet" || running.Recovery != "automatic" || running.ProgressPercent != 40 {
+		t.Fatalf("unexpected localized running status: %+v", running)
+	}
+}
+
+func TestMaintenanceModeAdvertisesOnlyHealthAndRepair(t *testing.T) {
+	ctx := context.Background()
+	server := NewWithOptions(Options{Maintenance: fakeMaintenance{report: maintenance.HealthReport{Status: maintenance.StatusUnhealthy}}})
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v1"}, nil)
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	serverSession, err := server.Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer serverSession.Close()
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clientSession.Close()
+
+	tools, err := clientSession.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tools.Tools) != 2 || tools.Tools[0].Name != "get_system_health" || tools.Tools[1].Name != "repair_managed_service" {
+		t.Fatalf("unexpected maintenance toolset: %+v", tools.Tools)
+	}
+}

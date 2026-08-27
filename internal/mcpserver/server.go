@@ -29,7 +29,9 @@ type ImportPhotoInput struct {
 	Confirmed    bool     `json:"confirmed" jsonschema:"must be true only after the user has reviewed the proposed import"`
 }
 
-type PolicyInput struct{}
+type PolicyInput struct {
+	Locale string `json:"locale,omitempty" jsonschema:"zh-TW, en, or de for human-readable policy notes"`
+}
 
 type PolicyOutput struct {
 	ImportRoots   []string `json:"importRoots"`
@@ -40,7 +42,37 @@ type PolicyOutput struct {
 }
 
 func New(manager *ingest.Manager, importRoots []string, libraryRoot string) *mcp.Server {
-	server := mcp.NewServer(&mcp.Implementation{Name: "apofocus-photo-import", Version: "v0.1.0"}, nil)
+	return NewWithOptions(Options{PhotoImporter: manager, ImportRoots: importRoots, LibraryRoot: libraryRoot})
+}
+
+func NewWithOptions(options Options) *mcp.Server {
+	server := mcp.NewServer(&mcp.Implementation{Name: "apofocus", Version: "v0.3.0"}, nil)
+	addPhotoImportTools(server, options.PhotoImporter, options.ImportRoots, options.LibraryRoot)
+	if options.Photos != nil {
+		addPhotoCatalogTools(server, options.Photos)
+	}
+	if options.Media != nil {
+		addMediaCatalogTools(server, options.Media)
+	}
+	if options.MediaImporter != nil {
+		addMediaImportTools(server, options.MediaImporter)
+	}
+	if options.Folders != nil && options.Photos != nil {
+		addFolderTools(server, options.Folders, options.Photos, options.Media)
+	}
+	if options.BatchJobs != nil {
+		addBatchTools(server, options.BatchJobs)
+	}
+	if options.Maintenance != nil {
+		addMaintenanceTools(server, options.Maintenance, options.BatchJobs)
+	}
+	return server
+}
+
+func addPhotoImportTools(server *mcp.Server, manager *ingest.Manager, importRoots []string, libraryRoot string) {
+	if manager == nil {
+		return
+	}
 	closedWorld := false
 	additive := false
 
@@ -49,12 +81,17 @@ func New(manager *ingest.Manager, importRoots []string, libraryRoot string) *mcp
 		Title:       "取得照片匯入規則",
 		Description: "Return the local allowlisted import roots and deterministic folder policy before choosing a source photo.",
 		Annotations: &mcp.ToolAnnotations{Title: "取得照片匯入規則", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: &closedWorld},
-	}, func(_ context.Context, _ *mcp.CallToolRequest, _ PolicyInput) (*mcp.CallToolResult, PolicyOutput, error) {
+	}, func(_ context.Context, _ *mcp.CallToolRequest, input PolicyInput) (*mcp.CallToolResult, PolicyOutput, error) {
+		locale := normalizedLocale(input.Locale)
 		return nil, PolicyOutput{
 			ImportRoots: importRoots, LibraryRoot: libraryRoot,
 			FolderPattern: filepath.Join(libraryRoot, "originals", "YYYY", "project", "YYYY-MM-DD_filename_sha.ext"),
-			SourceAction:  "copy; the source attachment is preserved",
-			Notes:         []string{"Call inspect_photo before import_photo.", "Only paths inside an import root are accepted.", "Imports are deduplicated by SHA-256."},
+			SourceAction:  localized(locale, "複製；來源附件會保留", "copy; the source attachment is preserved", "Kopie; die Quelldatei bleibt erhalten"),
+			Notes: []string{
+				localized(locale, "在 import_photo 前先呼叫 inspect_photo。", "Call inspect_photo before import_photo.", "Vor import_photo zuerst inspect_photo aufrufen."),
+				localized(locale, "只接受 import root 內的路徑。", "Only paths inside an import root are accepted.", "Nur Pfade innerhalb eines Import-Roots werden akzeptiert."),
+				localized(locale, "匯入會用 SHA-256 去重。", "Imports are deduplicated by SHA-256.", "Importe werden anhand von SHA-256 dedupliziert."),
+			},
 		}, nil
 	})
 
@@ -78,7 +115,6 @@ func New(manager *ingest.Manager, importRoots []string, libraryRoot string) *mcp
 		result, err := manager.Import(ctx, toImportRequest(input.SourcePath, input.Title, input.Project, input.LocationName, input.Tags, input.AutoTags))
 		return nil, result, err
 	})
-	return server
 }
 
 func toImportRequest(sourcePath, title, project, locationName string, tags []string, autoTags *bool) ingest.ImportRequest {

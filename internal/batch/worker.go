@@ -15,14 +15,15 @@ import (
 )
 
 type Worker struct {
-	repository    Repository
-	importer      Importer
-	mediaImporter MediaImporter
-	pollEvery     time.Duration
+	repository     Repository
+	importer       Importer
+	mediaImporter  MediaImporter
+	pollEvery      time.Duration
+	heartbeatEvery time.Duration
 }
 
 func NewWorker(repository Repository, importer Importer, mediaImporters ...MediaImporter) *Worker {
-	worker := &Worker{repository: repository, importer: importer, pollEvery: time.Second}
+	worker := &Worker{repository: repository, importer: importer, pollEvery: time.Second, heartbeatEvery: 30 * time.Second}
 	if len(mediaImporters) > 0 {
 		worker.mediaImporter = mediaImporters[0]
 	}
@@ -79,23 +80,43 @@ func (w *Worker) runOne(ctx context.Context) error {
 		if _, err := w.repository.Heartbeat(ctx, job.ID, item.SourcePath); err != nil {
 			return err
 		}
-		assetID := ""
-		var importErr error
-		if item.MediaType == "photo" {
-			result, err := w.importer.Import(ctx, ingest.ImportRequest{SourcePath: item.SourcePath, Project: job.Project, Tags: job.Tags, AutoTags: job.AutoTags})
-			assetID, importErr = result.PhotoID, err
-		} else if w.mediaImporter == nil {
-			importErr = errors.New("video/audio importer is not configured")
-		} else {
-			result, err := w.mediaImporter.Import(ctx, mediaingest.ImportRequest{SourcePath: item.SourcePath, Project: job.Project, Tags: job.Tags, AutoTags: job.AutoTags})
-			assetID, importErr = result.AssetID, err
-		}
+		assetID, importErr := w.importWithHeartbeat(ctx, job, item)
 		if err := w.repository.CompleteItem(ctx, job.ID, item.ID, item.MediaType, assetID, importErr); err != nil {
 			_ = w.repository.Finish(ctx, job.ID, err)
 			return err
 		}
 	}
 	return w.repository.Finish(ctx, job.ID, nil)
+}
+
+func (w *Worker) importWithHeartbeat(ctx context.Context, job Job, item Item) (string, error) {
+	done := make(chan struct{})
+	heartbeatDone := make(chan struct{})
+	go func() {
+		defer close(heartbeatDone)
+		ticker := time.NewTicker(w.heartbeatEvery)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				_, _ = w.repository.Heartbeat(ctx, job.ID, item.SourcePath)
+			}
+		}
+	}()
+	defer func() { close(done); <-heartbeatDone }()
+	if item.MediaType == "photo" {
+		result, err := w.importer.Import(ctx, ingest.ImportRequest{SourcePath: item.SourcePath, Project: job.Project, Tags: job.Tags, AutoTags: job.AutoTags})
+		return result.PhotoID, err
+	}
+	if w.mediaImporter == nil {
+		return "", errors.New("video/audio importer is not configured")
+	}
+	result, err := w.mediaImporter.Import(ctx, mediaingest.ImportRequest{SourcePath: item.SourcePath, Project: job.Project, Tags: job.Tags, AutoTags: job.AutoTags})
+	return result.AssetID, err
 }
 
 var errCancelRequested = errors.New("batch cancellation requested")

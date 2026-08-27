@@ -35,6 +35,7 @@ type Job struct {
 	CancelRequested bool       `json:"cancelRequested"`
 	CreatedAt       time.Time  `json:"createdAt"`
 	StartedAt       *time.Time `json:"startedAt,omitempty"`
+	HeartbeatAt     *time.Time `json:"heartbeatAt,omitempty"`
 	FinishedAt      *time.Time `json:"finishedAt,omitempty"`
 }
 
@@ -66,6 +67,16 @@ type Repository interface {
 	CompleteItem(context.Context, string, int64, string, string, error) error
 	Finish(context.Context, string, error) error
 	Heartbeat(context.Context, string, string) (bool, error)
+}
+
+// Resumer is implemented by persistent repositories that can safely requeue a
+// stale or terminal job without repeating items that already succeeded.
+type Resumer interface {
+	Resume(context.Context, string) (Job, error)
+}
+
+type Lister interface {
+	List(context.Context, string, int) ([]Job, error)
 }
 
 type Importer interface {

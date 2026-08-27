@@ -13,6 +13,28 @@ type ImportRequest struct {
 	AutoTags   bool
 }
 
+type Inspection struct {
+	SourcePath        string         `json:"sourcePath"`
+	ContentSHA256     string         `json:"contentSha256"`
+	MediaType         string         `json:"mediaType"`
+	Title             string         `json:"title"`
+	Project           string         `json:"project"`
+	RecordedAt        time.Time      `json:"recordedAt"`
+	SuggestedFolder   string         `json:"suggestedFolder"`
+	DurationMS        int64          `json:"durationMs"`
+	MimeType          string         `json:"mimeType"`
+	Codec             string         `json:"codec"`
+	Dimensions        string         `json:"dimensions,omitempty"`
+	SampleRate        int            `json:"sampleRate,omitempty"`
+	Channels          int            `json:"channels,omitempty"`
+	SuggestedTags     []string       `json:"suggestedTags"`
+	TranscriptPreview string         `json:"transcriptPreview,omitempty"`
+	SegmentCount      int            `json:"segmentCount"`
+	VisualVectorCount int            `json:"visualVectorCount"`
+	AudioVectorCount  int            `json:"audioVectorCount"`
+	Metadata          map[string]any `json:"metadata,omitempty"`
+}
+
 type Segment struct {
 	SegmentType          string         `json:"segmentType"`
 	Index                int            `json:"index"`

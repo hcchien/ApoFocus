@@ -146,6 +146,7 @@ def main() -> None:
                     "PHOTO_LIBRARY_ROOT": str(args.library_root),
                     "APOFOCUS_IMPORT_ROOTS": args.import_roots,
                     "EMBEDDING_SERVICE_URL": "http://127.0.0.1:8090",
+                    "APOFOCUS_APP_URL": args.app_url,
                 },
             }
         }

@@ -66,6 +66,78 @@ func NewManager(libraryRoot string, importRoots []string, analyzer Analyzer, rep
 	return &Manager{libraryRoot: root, importRoots: cleanImports, analyzer: analyzer, repository: repository}, nil
 }
 
+func (m *Manager) Inspect(ctx context.Context, request ImportRequest) (Inspection, error) {
+	source, stat, err := m.resolveSource(request.SourcePath)
+	if err != nil {
+		return Inspection{}, err
+	}
+	mediaType := DetectMediaType(source)
+	if mediaType == "" {
+		return Inspection{}, errors.New("unsupported video or audio file type")
+	}
+	if stat.Size() > maxMediaBytes {
+		return Inspection{}, fmt.Errorf("media exceeds the %d byte limit", maxMediaBytes)
+	}
+	hash, err := hashFile(source)
+	if err != nil {
+		return Inspection{}, err
+	}
+	stagingRoot := filepath.Join(m.libraryRoot, ".staging")
+	if err := os.MkdirAll(stagingRoot, 0o750); err != nil {
+		return Inspection{}, err
+	}
+	stagingDir, err := os.MkdirTemp(stagingRoot, "inspect-")
+	if err != nil {
+		return Inspection{}, err
+	}
+	defer os.RemoveAll(stagingDir)
+	analysis, err := m.analyzer.AnalyzeMedia(ctx, source, filepath.Join(stagingDir, "thumbnail.jpg"), filepath.Join(stagingDir, "segments"), request.AutoTags)
+	if err != nil {
+		return Inspection{}, err
+	}
+	if analysis.MediaType != mediaType {
+		return Inspection{}, fmt.Errorf("extension suggests %s but analyzer detected %s", mediaType, analysis.MediaType)
+	}
+	recordedAt := stat.ModTime()
+	if parsed, parseErr := time.Parse(time.RFC3339Nano, analysis.RecordedAt); parseErr == nil {
+		recordedAt = parsed
+	}
+	project := cleanLabel(request.Project, 120)
+	if project == "" {
+		project = "未分類"
+	}
+	title := cleanLabel(request.Title, 240)
+	if title == "" {
+		title = strings.TrimSuffix(filepath.Base(source), filepath.Ext(source))
+	}
+	originalPath, _, _ := m.destinationPaths(mediaType, project, title, hash, filepath.Ext(source), recordedAt)
+	visualVectors, audioVectors := 0, 0
+	for _, segment := range analysis.Segments {
+		if len(segment.VisualVector) > 0 {
+			visualVectors++
+		}
+		if len(segment.AudioVector) > 0 {
+			audioVectors++
+		}
+	}
+	preview := []rune(strings.TrimSpace(analysis.Transcript))
+	if len(preview) > 500 {
+		preview = append(preview[:500], '…')
+	}
+	tags := mergeTags(request.Tags, nil)
+	if request.AutoTags {
+		tags = mergeTags(request.Tags, analysis.Tags)
+	}
+	return Inspection{
+		SourcePath: source, ContentSHA256: hash, MediaType: mediaType, Title: title, Project: project,
+		RecordedAt: recordedAt, SuggestedFolder: filepath.Dir(originalPath), DurationMS: analysis.DurationMS,
+		MimeType: analysis.MimeType, Codec: analysis.Codec, Dimensions: analysis.Dimensions,
+		SampleRate: analysis.SampleRate, Channels: analysis.Channels, SuggestedTags: tags,
+		TranscriptPreview: string(preview), SegmentCount: len(analysis.Segments),
+		VisualVectorCount: visualVectors, AudioVectorCount: audioVectors, Metadata: analysis.Metadata,
+	}, nil
+}
+
 func (m *Manager) Import(ctx context.Context, request ImportRequest) (ImportResult, error) {
 	source, stat, err := m.resolveSource(request.SourcePath)
 	if err != nil {
@@ -115,6 +187,11 @@ func (m *Manager) Import(ctx context.Context, request ImportRequest) (ImportResu
 		title = strings.TrimSuffix(filepath.Base(source), filepath.Ext(source))
 	}
 	originalPath, thumbnailPath, segmentDir := m.destinationPaths(mediaType, project, title, hash, filepath.Ext(source), recordedAt)
+	// A process can stop after analyzed artifacts were moved but before the DB
+	// transaction. These paths contain the content hash, so replacing leftovers
+	// is safe when FindByHash above confirmed that no completed asset exists.
+	_ = os.Remove(thumbnailPath)
+	_ = os.RemoveAll(segmentDir)
 	if err := moveAnalyzedFiles(stagingThumbnail, stagingSegments, thumbnailPath, segmentDir, analysis.Segments); err != nil {
 		return ImportResult{}, err
 	}
@@ -295,29 +372,41 @@ func copyFile(source, destination string) (bool, error) {
 		return false, err
 	}
 	defer input.Close()
-	output, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o640)
-	if errors.Is(err, os.ErrExist) {
+	output, err := os.CreateTemp(filepath.Dir(destination), ".apofocus-copy-*")
+	if err != nil {
+		return false, err
+	}
+	temporary := output.Name()
+	defer os.Remove(temporary)
+	if err := output.Chmod(0o640); err != nil {
+		_ = output.Close()
+		return false, err
+	}
+	if _, err := io.Copy(output, input); err != nil {
+		_ = output.Close()
+		return false, err
+	}
+	if err := output.Sync(); err != nil {
+		_ = output.Close()
+		return false, err
+	}
+	if err := output.Close(); err != nil {
+		return false, err
+	}
+	if _, err := os.Stat(destination); err == nil {
 		existingHash, hashErr := hashFile(destination)
 		sourceHash, sourceErr := hashFile(source)
 		if hashErr == nil && sourceErr == nil && existingHash == sourceHash {
 			return false, nil
 		}
 		return false, errors.New("destination exists with different content")
-	}
-	if err != nil {
+	} else if !errors.Is(err, os.ErrNotExist) {
 		return false, err
 	}
-	if _, err := io.Copy(output, input); err != nil {
-		_ = output.Close()
-		_ = os.Remove(destination)
+	if err := os.Rename(temporary, destination); err != nil {
 		return false, err
 	}
-	if err := output.Sync(); err != nil {
-		_ = output.Close()
-		_ = os.Remove(destination)
-		return false, err
-	}
-	return true, output.Close()
+	return true, nil
 }
 
 func cleanLabel(value string, limit int) string {

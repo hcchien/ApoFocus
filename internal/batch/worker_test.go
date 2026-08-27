@@ -6,25 +6,35 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/hcchien/apofocus/internal/ingest"
 	"github.com/hcchien/apofocus/internal/mediaingest"
 )
 
 type workerRepo struct {
-	job       Job
-	claimed   bool
-	items     []Item
-	completed int
-	failed    int
-	finished  bool
+	job        Job
+	claimed    bool
+	items      []Item
+	completed  int
+	failed     int
+	finished   bool
+	resumed    bool
+	heartbeats atomic.Int32
 }
 
 func (r *workerRepo) Create(context.Context, CreateInput) (Job, error)   { return Job{}, nil }
 func (r *workerRepo) Get(context.Context, string) (Job, error)           { return r.job, nil }
+func (r *workerRepo) List(context.Context, string, int) ([]Job, error)   { return []Job{r.job}, nil }
 func (r *workerRepo) Items(context.Context, string, int) ([]Item, error) { return r.items, nil }
 func (r *workerRepo) Cancel(context.Context, string) error               { return nil }
+func (r *workerRepo) Resume(context.Context, string) (Job, error) {
+	r.resumed = true
+	r.job.Status = "pending"
+	return r.job, nil
+}
 func (r *workerRepo) ClaimNext(context.Context) (Job, bool, error) {
 	if r.claimed {
 		return Job{}, false, nil
@@ -57,14 +67,18 @@ func (r *workerRepo) CompleteItem(_ context.Context, _ string, id int64, _, _ st
 	}
 	return nil
 }
-func (r *workerRepo) Finish(context.Context, string, error) error             { r.finished = true; return nil }
-func (r *workerRepo) Heartbeat(context.Context, string, string) (bool, error) { return false, nil }
+func (r *workerRepo) Finish(context.Context, string, error) error { r.finished = true; return nil }
+func (r *workerRepo) Heartbeat(context.Context, string, string) (bool, error) {
+	r.heartbeats.Add(1)
+	return false, nil
+}
 
 type sequentialImporter struct {
 	mu        sync.Mutex
 	active    int
 	maxActive int
 	paths     []string
+	delay     time.Duration
 }
 
 type sequentialMediaImporter struct{ paths []string }
@@ -76,6 +90,9 @@ func (i *sequentialMediaImporter) Import(_ context.Context, request mediaingest.
 
 func (i *sequentialImporter) ValidateBatchRoot(path string) (string, error) { return path, nil }
 func (i *sequentialImporter) Import(_ context.Context, request ingest.ImportRequest) (ingest.ImportResult, error) {
+	if i.delay > 0 {
+		time.Sleep(i.delay)
+	}
 	i.mu.Lock()
 	i.active++
 	if i.active > i.maxActive {
@@ -122,6 +139,30 @@ func TestWorkerScansRecursivelyAndProcessesSequentially(t *testing.T) {
 	}
 	if len(mediaImporter.paths) != 2 {
 		t.Fatalf("expected video and audio imports, got %v", mediaImporter.paths)
+	}
+}
+
+func TestServiceResumeDelegatesToPersistentRepository(t *testing.T) {
+	repo := &workerRepo{job: Job{ID: "job", Status: "failed"}}
+	service := NewService(repo, &sequentialImporter{})
+	job, err := service.Resume(context.Background(), "job")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !repo.resumed || job.Status != "pending" {
+		t.Fatalf("expected failed job to be requeued, got %+v", job)
+	}
+}
+
+func TestWorkerKeepsHeartbeatFreshDuringLongImport(t *testing.T) {
+	repo := &workerRepo{}
+	worker := NewWorker(repo, &sequentialImporter{delay: 12 * time.Millisecond})
+	worker.heartbeatEvery = time.Millisecond
+	if _, err := worker.importWithHeartbeat(context.Background(), Job{ID: "job"}, Item{SourcePath: "photo.jpg", MediaType: "photo"}); err != nil {
+		t.Fatal(err)
+	}
+	if repo.heartbeats.Load() == 0 {
+		t.Fatal("expected heartbeat updates while importing")
 	}
 }
 

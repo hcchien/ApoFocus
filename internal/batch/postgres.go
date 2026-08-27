@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 )
 
 var ErrNotFound = errors.New("batch job not found")
@@ -16,7 +17,7 @@ func NewPostgresRepository(db *sql.DB) *PostgresRepository { return &PostgresRep
 
 const jobColumns = `id::text,source_root,project,tags::text,recursive,auto_tags,media_types::text,status,
 discovered_count,processed_count,succeeded_count,failed_count,current_path,error,cancel_requested,
-created_at,started_at,finished_at`
+created_at,started_at,heartbeat_at,finished_at`
 const jobSelect = `SELECT ` + jobColumns + ` FROM batch_jobs`
 
 func (r *PostgresRepository) Create(ctx context.Context, input CreateInput) (Job, error) {
@@ -39,6 +40,23 @@ func (r *PostgresRepository) Get(ctx context.Context, id string) (Job, error) {
 		return Job{}, ErrNotFound
 	}
 	return job, err
+}
+
+func (r *PostgresRepository) List(ctx context.Context, status string, limit int) ([]Job, error) {
+	rows, err := r.db.QueryContext(ctx, jobSelect+` WHERE ($1='' OR status=$1) ORDER BY created_at DESC LIMIT $2`, status, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	jobs := []Job{}
+	for rows.Next() {
+		job, err := scanJob(rows)
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, job)
+	}
+	return jobs, rows.Err()
 }
 
 func (r *PostgresRepository) Items(ctx context.Context, id string, limit int) ([]Item, error) {
@@ -73,6 +91,48 @@ func (r *PostgresRepository) Cancel(ctx context.Context, id string) error {
 		}
 	}
 	return nil
+}
+
+func (r *PostgresRepository) Resume(ctx context.Context, id string) (Job, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Job{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var status string
+	var heartbeat sql.NullTime
+	if err := tx.QueryRowContext(ctx, `SELECT status,heartbeat_at FROM batch_jobs WHERE id=$1 FOR UPDATE`, id).Scan(&status, &heartbeat); errors.Is(err, sql.ErrNoRows) {
+		return Job{}, ErrNotFound
+	} else if err != nil {
+		return Job{}, err
+	}
+	if status == "completed" {
+		return Job{}, errors.New("completed batch job has nothing to resume")
+	}
+	if status == "scanning" || status == "running" {
+		if heartbeat.Valid && time.Since(heartbeat.Time) < 2*time.Minute {
+			return Job{}, errors.New("batch job is still active")
+		}
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE batch_items SET status='pending',photo_id=NULL,media_asset_id=NULL,error='',started_at=NULL,finished_at=NULL
+		WHERE job_id=$1 AND status IN ('running','failed')`, id); err != nil {
+		return Job{}, err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE batch_jobs SET status='pending',
+		processed_count=(SELECT count(*) FROM batch_items WHERE job_id=$1 AND status='succeeded'),
+		succeeded_count=(SELECT count(*) FROM batch_items WHERE job_id=$1 AND status='succeeded'),
+		failed_count=0,current_path='',error='',cancel_requested=false,heartbeat_at=NULL,finished_at=NULL
+		WHERE id=$1`, id); err != nil {
+		return Job{}, err
+	}
+	job, err := scanJob(tx.QueryRowContext(ctx, jobSelect+` WHERE id=$1`, id))
+	if err != nil {
+		return Job{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Job{}, err
+	}
+	return job, nil
 }
 
 func (r *PostgresRepository) ClaimNext(ctx context.Context) (Job, bool, error) {
@@ -201,7 +261,7 @@ type rowScanner interface{ Scan(...any) error }
 func scanJob(row rowScanner) (Job, error) {
 	var job Job
 	var tagsJSON, mediaTypesJSON string
-	err := row.Scan(&job.ID, &job.SourceRoot, &job.Project, &tagsJSON, &job.Recursive, &job.AutoTags, &mediaTypesJSON, &job.Status, &job.DiscoveredCount, &job.ProcessedCount, &job.SucceededCount, &job.FailedCount, &job.CurrentPath, &job.Error, &job.CancelRequested, &job.CreatedAt, &job.StartedAt, &job.FinishedAt)
+	err := row.Scan(&job.ID, &job.SourceRoot, &job.Project, &tagsJSON, &job.Recursive, &job.AutoTags, &mediaTypesJSON, &job.Status, &job.DiscoveredCount, &job.ProcessedCount, &job.SucceededCount, &job.FailedCount, &job.CurrentPath, &job.Error, &job.CancelRequested, &job.CreatedAt, &job.StartedAt, &job.HeartbeatAt, &job.FinishedAt)
 	if err != nil {
 		return Job{}, err
 	}

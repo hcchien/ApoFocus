@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 type fakeAnalyzer struct{ calls int }
@@ -95,6 +96,89 @@ func TestManagerImportsVideoAndDeduplicates(t *testing.T) {
 	}
 	if !retry.AlreadyExists || retry.AssetID != "asset-1" || analyzer.calls != 1 {
 		t.Fatalf("retry was not deduplicated: %+v, analyzer calls=%d", retry, analyzer.calls)
+	}
+}
+
+func TestManagerInspectsVideoWithoutPersistingArtifacts(t *testing.T) {
+	root := t.TempDir()
+	inbox := filepath.Join(root, "inbox")
+	library := filepath.Join(root, "library")
+	if err := os.MkdirAll(inbox, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(inbox, "preview.mp4")
+	if err := os.WriteFile(source, []byte("video bytes"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewManager(library, []string{inbox}, &fakeAnalyzer{}, &fakeRepository{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inspection, err := manager.Inspect(context.Background(), ImportRequest{SourcePath: source, Project: "紀錄片", Tags: []string{"客戶"}, AutoTags: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inspection.MediaType != "video" || inspection.SegmentCount != 1 || inspection.VisualVectorCount != 1 {
+		t.Fatalf("unexpected inspection: %+v", inspection)
+	}
+	if !strings.Contains(inspection.SuggestedFolder, filepath.Join("originals", "videos", "2026", "紀錄片")) {
+		t.Fatalf("unexpected suggested folder: %s", inspection.SuggestedFolder)
+	}
+	entries, err := os.ReadDir(filepath.Join(library, ".staging"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("inspection left staging artifacts: %v", entries)
+	}
+}
+
+func TestManagerReplacesArtifactsLeftByInterruptedImport(t *testing.T) {
+	root := t.TempDir()
+	inbox := filepath.Join(root, "inbox")
+	library := filepath.Join(root, "library")
+	if err := os.MkdirAll(inbox, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(inbox, "clip.mp4")
+	if err := os.WriteFile(source, []byte("video bytes"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewManager(library, []string{inbox}, &fakeAnalyzer{}, &fakeRepository{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, err := hashFile(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordedAt, _ := time.Parse(time.RFC3339Nano, "2026-08-26T12:00:00Z")
+	_, thumbnailPath, segmentDir := manager.destinationPaths("video", "紀錄片", "clip", hash, ".mp4", recordedAt)
+	if err := os.MkdirAll(segmentDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(thumbnailPath), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(thumbnailPath, []byte("stale thumbnail"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(segmentDir, "stale.jpg"), []byte("stale"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	result, err := manager.Import(context.Background(), ImportRequest{SourcePath: source, Project: "紀錄片", AutoTags: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thumbnail, err := os.ReadFile(result.ThumbnailPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(thumbnail) != "thumbnail" {
+		t.Fatalf("stale thumbnail was not replaced: %q", thumbnail)
+	}
+	if _, err := os.Stat(filepath.Join(segmentDir, "stale.jpg")); !os.IsNotExist(err) {
+		t.Fatalf("stale segment survived retry: %v", err)
 	}
 }
 

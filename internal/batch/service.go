@@ -16,6 +16,9 @@ func NewService(repository Repository, importer Importer) *Service {
 }
 
 func (s *Service) Create(ctx context.Context, input CreateInput) (Job, error) {
+	if s.importer == nil {
+		return Job{}, errors.New("batch importer is unavailable while the managed library is offline")
+	}
 	root, err := s.importer.ValidateBatchRoot(input.SourceRoot)
 	if err != nil {
 		return Job{}, err
@@ -49,3 +52,29 @@ func (s *Service) Items(ctx context.Context, id string, limit int) ([]Item, erro
 	return s.repository.Items(ctx, id, limit)
 }
 func (s *Service) Cancel(ctx context.Context, id string) error { return s.repository.Cancel(ctx, id) }
+
+func (s *Service) Resume(ctx context.Context, id string) (Job, error) {
+	resumer, ok := s.repository.(Resumer)
+	if !ok {
+		return Job{}, errors.New("batch repository does not support resume")
+	}
+	return resumer.Resume(ctx, id)
+}
+
+func (s *Service) List(ctx context.Context, status string, limit int) ([]Job, error) {
+	lister, ok := s.repository.(Lister)
+	if !ok {
+		return nil, errors.New("batch repository does not support listing jobs")
+	}
+	status = strings.TrimSpace(strings.ToLower(status))
+	if status != "" && status != "pending" && status != "scanning" && status != "running" && status != "completed" && status != "completed_with_errors" && status != "failed" && status != "cancelled" {
+		return nil, errors.New("invalid batch status")
+	}
+	if limit < 1 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	return lister.List(ctx, status, limit)
+}

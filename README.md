@@ -16,7 +16,7 @@ ApoFocus 是為職業攝影師設計的照片、影片與音訊索引網站。Go
 - 無資料庫時自動使用內建展示資料
 - PostgreSQL schema、索引與 512 維 HNSW pgvector index
 - OpenCLIP 批次向量 worker，以及可獨立呼叫的本機 embedding API
-- MCP 照片匯入：先預覽 EXIF／建議分類，再安全複製至 managed library 並寫入 DB
+- 完整 MCP 操作面：照片／影音匯入、catalog 搜尋、向量相似搜尋、folders／collections，以及可監控、取消、恢復的 batch jobs
 - 以 SHA-256 去重；重試同一張照片不會產生重複資料
 - Finder 式虛擬資料夾：照片依年份、專題、Tags、相機與鏡頭；影片／音訊另可依 Codec 瀏覽
 - 手動 Collections 與保存 filter JSON 的智慧資料夾
@@ -27,13 +27,16 @@ ApoFocus 是為職業攝影師設計的照片、影片與音訊索引網站。Go
 ## 系統邊界
 
 ```text
-LLM / MCP host ──stdio──> Go MCP server ──transaction──> PostgreSQL + pgvector
-                              │                         ▲
-                              ├──copy──> Local library  │
-                              └──HTTP──> Python models + FFmpeg┘
+Remote user ──LLM client remote──> Local LLM / MCP host ──stdio──> Go MCP server
+                                                                    │
+                                      ┌─────────────────────────────┼──────────────────────┐
+                                      ▼                             ▼                      ▼
+                              PostgreSQL + pgvector          Local library       Python models + FFmpeg
 
 Browser ──HTTP──> Go Web API ──SQL──> PostgreSQL + pgvector
 ```
+
+遠端連線、帳號驗證與 task session 由使用者選擇的 LLM client 負責；ApoFocus MCP 仍只在 Mac 本機透過 stdio 執行，不開 public MCP port。Agent 只在使用者傳訊息要求查看或修復時呼叫 MCP，Batch Worker 不依賴 Agent 在線。
 
 `photos` 與 `media_assets` 的 `path`／`thumbnail_path` 保存伺服器或 NAS 上的實際路徑，只供後端、MCP server 與向量 worker 使用。瀏覽器只取得 `image_url`／`media_url` 與 `thumbnail_url`；API 不輸出本機 path，保存的 ffprobe metadata 也會移除來源 filename，避免洩漏儲存拓撲。
 
@@ -208,7 +211,25 @@ make embedding-serve-offline  # 權重已快取後，不做網路檢查
 4. 網頁透過 `GET /api/v1/batch-jobs/{id}/events` 的 SSE 接收即時進度。
 5. SSE 斷線時改用短輪詢；重新整理頁面不會中止工作。
 
-這裡不使用 WebSocket，因為進度是 server 到瀏覽器的單向事件；取消使用獨立的 `POST /cancel` 即可。PostgreSQL job queue 讓 app 意外退出後能從未完成的 item 恢復，並利用媒體 SHA-256 保證重試安全。
+這裡不使用 WebSocket，因為進度是 server 到瀏覽器或 MCP client 的單向狀態變化；取消使用獨立操作即可。PostgreSQL job queue 讓 app 意外退出後能從未完成的 item 恢復，並利用媒體 SHA-256 保證重試安全。
+
+- worker 在掃描及單檔模型分析期間持續更新 heartbeat。process 中斷後，重新啟動的 worker 會在 heartbeat stale 兩分鐘後自動接手，並把中斷時仍為 `running` 的 item 退回 `pending`。
+- `wait_batch_job` 是最長 30 秒的 MCP long-poll；狀態或 `processedCount` 改變就立即回傳，逾時則回傳未改變狀態。LLM 可以重複呼叫，不需要維持一條涵蓋整批工作的連線。
+- `resume_batch_job` 可將 stale、`failed`、`cancelled` 或 `completed_with_errors` 工作重新排入 queue。已成功項目保持不變，只重試 `running`／`failed`／尚未完成的項目；仍有新 heartbeat 的活躍工作會拒絕 resume，避免重複處理。
+
+### Worker 執行與中斷恢復
+
+Batch worker 不是獨立 binary；它和 Web API 一起由 `cmd/apofocus` 啟動。只有在 `DATABASE_URL` 已設定、`PHOTO_LIBRARY_ROOT` 可用，且 `APOFOCUS_IMPORT_ROOTS` 不為空時，Web process 才會啟用 worker。macOS installer 會讓 `com.apofocus.web` LaunchAgent 在 process 異常結束後重新啟動，因此通常不需要使用者或 MCP 手動介入。
+
+Worker 的行為：
+
+- 每秒檢查一次 PostgreSQL queue，一次 claim 一個 job，且一次只處理一個檔案；目前不會並行執行照片、影片或音訊模型。
+- 掃描期間會定期保存已找到的 `batch_items` 並更新 heartbeat；單檔 metadata、copy、縮圖、向量或逐字稿分析期間，每 30 秒更新 heartbeat。
+- 每個成功 item 立即寫回 PostgreSQL。若 process 中斷，已成功項目不重做；當 heartbeat 超過兩分鐘未更新，任何重新啟動的 worker 都可自動 claim 該 job，並將中斷時的 `running` item 改回 `pending`。
+- 取消是 cooperative：worker 完成目前不可分割的單檔步驟、再次檢查 `cancel_requested` 後停止。
+- 若 job 已正式進入 `failed`、`cancelled` 或 `completed_with_errors`，worker 不會無限自動重試；可由 UI 或 MCP 的 `resume_batch_job` 明確重新排入 queue。
+
+MCP server 與 worker 是分開的 process。`apofocus-mcp` 可以建立、列出、監控、取消及 resume batch job，但不會自行處理 queue；至少需要一個 `cmd/apofocus` Web process 正在執行。若 Web/worker 沒有重新啟動，job 仍會安全保留在 PostgreSQL，直到 worker 再次上線。
 
 網站內可直接開啟「批次匯入」，也可以使用 CLI。CLI 的每次 HTTP request 都很短，不會等待整批完成：
 
@@ -244,15 +265,18 @@ Batch API：
 
 SHA-256 仍用於內容去重；它不能在沒有 index 或 filesystem event 的情況下告訴系統「檔案搬到哪裡」。如果程式關閉期間把檔案搬出 managed library、跨 filesystem 複製後刪除，inode 也會改變，系統只能先標成 `missing`。這種情況之後可再加一個由使用者指定範圍的 relink job，以 size/mtime 縮小候選後才計算 SHA-256，而不是無條件掃所有磁碟。
 
-## MCP：讓 LLM 匯入照片
+## MCP：讓 LLM 操作 ApoFocus
 
-MCP server 使用官方 Go SDK 與 stdio transport，提供三個 tools：
+MCP server 使用官方 Go SDK 與 stdio transport，共提供 25 個 tools：
 
-| Tool | 行為 |
-|---|---|
-| `get_photo_import_policy` | 唯讀；取得 allowlist 與 folder 規則 |
-| `inspect_photo` | 唯讀；解析 EXIF／GeoTag、預覽目標 folder，可用 OpenCLIP 建議 Tags |
-| `import_photo` | 寫入；`confirmed: true` 後複製原檔、產縮圖和向量，以 transaction 寫入照片、專題與 Tags |
+| 類別 | Tools | 行為 |
+|---|---|---|
+| 照片匯入 | `get_photo_import_policy`、`inspect_photo`、`import_photo` | allowlist、EXIF／GeoTag 預覽、folder、OpenCLIP Tags／向量、縮圖及 transaction 寫入 |
+| 照片搜尋 | `search_photos`、`get_photo`、`find_similar_photos` | 年份、專題、Tags、相機、鏡頭、ISO、GeoTag、全文搜尋與 pgvector 相似搜尋 |
+| 影片／音訊 | `inspect_media`、`import_media`、`search_media`、`get_media`、`find_similar_media` | metadata、逐字稿、keyframes、OpenCLIP／CLAP vectors、Tags、搜尋與相似度 |
+| 虛擬資料夾 | `browse_folders`、`create_collection`、`add_photos_to_collection`、`get_collection_photos` | facets、Finder 式 browsing、manual／smart collections；`browse_folders.locale` 支援 `zh-TW`、`en`、`de` |
+| Batch | `create_batch_job`、`list_batch_jobs`、`get_batch_job`、`wait_batch_job`、`list_batch_items`、`cancel_batch_job`、`resume_batch_job` | 建立與找回持久化工作、短輪詢監控、逐檔錯誤、取消與安全恢復；狀態 label 支援三種語言 |
+| 維運 | `get_system_health`、`diagnose_batch_job`、`repair_managed_service` | 檢查 DB、Web／Worker、模型服務、heartbeat、路徑與磁碟空間；診斷後只允許重啟固定 LaunchAgents |
 
 資料夾規則為：
 
@@ -261,7 +285,7 @@ MCP server 使用官方 Go SDK 與 stdio transport，提供三個 tools：
 <PHOTO_LIBRARY_ROOT>/thumbnails/YYYY/<project>/YYYY-MM-DD_<filename>_<sha-prefix>.jpg
 ```
 
-MCP host 必須先將聊天中附加的照片落到 `APOFOCUS_IMPORT_ROOTS` 其中一個本機目錄，再把該絕對路徑傳入 `source_path`。server 會解析 symlink 並重新檢查範圍，不接受任意 filesystem path。來源檔一律保留，匯入採 copy。
+MCP host 必須先將聊天中附加的照片、影片或音訊落到 `APOFOCUS_IMPORT_ROOTS` 其中一個本機目錄，再把該絕對路徑傳入 `source_path`。server 會解析 symlink 並重新檢查範圍，不接受任意 filesystem path。來源檔一律保留，匯入採 copy。
 
 啟動順序：
 
@@ -272,9 +296,11 @@ export PHOTO_LIBRARY_ROOT='/Volumes/PhotoArchive/ApoFocus'
 export PHOTO_ROOTS="$APOFOCUS_IMPORT_ROOTS"
 export THUMBNAIL_ROOTS="$PHOTO_LIBRARY_ROOT"
 export EMBEDDING_SERVICE_URL='http://127.0.0.1:8090'
+export APOFOCUS_APP_URL='http://127.0.0.1:8080'
 
 make embedding-serve   # terminal 1
-make build-mcp         # 產生 bin/apofocus-mcp
+make run               # terminal 2，包含 Web API 與 Batch Worker
+make build-mcp         # 產生 bin/apofocus-mcp，交由 LLM client 啟動
 ```
 
 通用的 MCP client 設定如下；實際最外層設定名稱依 client 而異：
@@ -288,22 +314,34 @@ make build-mcp         # 產生 bin/apofocus-mcp
         "DATABASE_URL": "postgres://apofocus:apofocus@localhost:5432/apofocus?sslmode=disable",
         "APOFOCUS_IMPORT_ROOTS": "/Users/me/Downloads/ApoFocus-Inbox",
         "PHOTO_LIBRARY_ROOT": "/Volumes/PhotoArchive/ApoFocus",
-        "EMBEDDING_SERVICE_URL": "http://127.0.0.1:8090"
+        "EMBEDDING_SERVICE_URL": "http://127.0.0.1:8090",
+        "APOFOCUS_APP_URL": "http://127.0.0.1:8080"
       }
     }
   }
 }
 ```
 
-建議的 LLM 操作順序：
+建議的單檔 LLM 操作順序：
 
-1. 使用者附加照片，MCP host 將檔案放入 allowlisted inbox。
-2. LLM 呼叫 `inspect_photo`，把 EXIF、建議 folder 與 Tags 呈現給使用者。
+1. 使用者附加照片、影片或音訊，MCP host 將檔案放入 allowlisted inbox。
+2. LLM 呼叫 `inspect_photo` 或 `inspect_media`，把 metadata、建議 folder 與 Tags 呈現給使用者。
 3. 使用者確認或修改標題、專題、地點與 Tags。
-4. LLM 呼叫 `import_photo` 並傳入 `confirmed: true`。
-5. 回傳 DB photo ID、實際原圖／縮圖 path、最終 Tags 與向量維度。
+4. LLM 呼叫 `import_photo` 或 `import_media` 並傳入 `confirmed: true`。
+5. 回傳 DB ID、實際原檔／縮圖 path、最終 Tags，以及向量或片段摘要。
 
 自動 Tags 完全在本機執行：OpenCLIP 會從可在 [services/embedding/app.py](services/embedding/app.py) 調整的攝影詞彙中挑出最多四個高於信心門檻的標籤；數量與門檻可透過 `AUTO_TAG_LIMIT`、`AUTO_TAG_MIN_SCORE` 調整。LLM 提供的 Tags 會與自動 Tags 合併、去重，而非直接覆蓋。
+
+### Agent 維運流程
+
+使用者不需要讓 Agent 長時間監看 Batch。從遠端回到本地 LLM client 並詢問進度時，Agent 應依序：
+
+1. 呼叫 `get_system_health`，檢查 PostgreSQL、Web／Worker、embedding service、Batch heartbeat、library／import roots 與磁碟空間。
+2. 以 `list_batch_jobs` 找回近期工作，再對目標呼叫 `diagnose_batch_job`。診斷會區分正常長時間分析、stale heartbeat、服務停止、來源硬碟離線、library 空間不足和可重試的終止工作。
+3. 若診斷建議修復，才呼叫 `repair_managed_service` 並傳入 `confirmed: true`。`service` 只接受 `postgres`、`web` 或 `embedding`，底層只執行對應的 `com.apofocus.*` LaunchAgent restart，不接受 command、argument 或任意 shell input。
+4. 再次呼叫 `get_system_health`。服務恢復後，stale 的 active job 會由 Worker 自動接手；只有 `failed`、`cancelled` 或 `completed_with_errors` 才需要呼叫 `resume_batch_job`。
+
+若 PostgreSQL 離線，MCP 會以降級維運模式啟動，只提供健康檢查與固定服務修復；若 managed library 離線，則保留 catalog、Batch 查詢與維運 tools，但不載入會寫入 library 的單檔匯入工具。修復 PostgreSQL 或重新掛載 library 後，重新連線 MCP client 即會載入完整 toolset。
 
 ## API
 
