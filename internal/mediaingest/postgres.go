@@ -54,7 +54,7 @@ func (r *PostgresRepository) Insert(ctx context.Context, record Record) (string,
 	var assetID string
 	err = tx.QueryRowContext(ctx, `INSERT INTO media_assets(media_type,project_id,title,capture_year,recorded_at,duration_ms,mime_type,codec,dimensions,sample_rate,channels,path,thumbnail_path,content_sha256,media_url,thumbnail_url,transcript,metadata,
 		storage_root_id,relative_path,file_id,availability_status,last_verified_at,thumbnail_relative_path,thumbnail_file_id,thumbnail_status)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,NULLIF($10,0),NULLIF($11,0),$12,$13,$14,$15,$16,$17,$18::jsonb,NULLIF($19,'')::uuid,NULLIF($20,''),NULLIF($21,''),'available',now(),NULLIF($22,''),NULLIF($23,''),'available') RETURNING id::text`,
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,NULLIF($10,0),NULLIF($11,0),$12,NULLIF($13,''),$14,$15,$16,$17,$18::jsonb,NULLIF($19,'')::uuid,NULLIF($20,''),NULLIF($21,''),'available',now(),NULLIF($22,''),NULLIF($23,''),CASE WHEN $13='' THEN 'unknown' ELSE 'available' END) RETURNING id::text`,
 		record.MediaType, projectID, record.Title, record.Year, record.RecordedAt, record.DurationMS, record.MimeType, record.Codec,
 		record.Dimensions, record.SampleRate, record.Channels, record.Path, record.ThumbnailPath, record.ContentSHA256,
 		record.MediaURL, record.ThumbnailURL, record.Transcript, metadata, r.storageRootID, record.RelativePath,

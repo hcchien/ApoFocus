@@ -9,10 +9,12 @@ from __future__ import annotations
 import os
 import json
 import importlib.util
+import io
 import mimetypes
 import shutil
 import subprocess
 import tempfile
+import time
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -21,7 +23,7 @@ import open_clip
 import rawpy
 import torch
 from fastapi import FastAPI, HTTPException
-from PIL import Image
+from PIL import Image, ImageOps, features
 from pydantic import BaseModel, Field
 
 WHISPER_INSTALLED = importlib.util.find_spec("whisper") is not None
@@ -52,6 +54,14 @@ MAX_VIDEO_SEGMENTS = max(1, int(os.getenv("MAX_VIDEO_SEGMENTS", "300")))
 AUDIO_SEGMENT_SECONDS = max(5, int(os.getenv("AUDIO_SEGMENT_SECONDS", "30")))
 MAX_AUDIO_SEGMENTS = max(1, int(os.getenv("MAX_AUDIO_SEGMENTS", "600")))
 CLAP_EXPECTED_DIMENSIONS = int(os.getenv("CLAP_EXPECTED_DIMENSIONS", "512"))
+VIDEO_KEYFRAME_MAX_EDGE = max(320, int(os.getenv("VIDEO_KEYFRAME_MAX_EDGE", "960")))
+PHOTO_THUMBNAIL_MAX_EDGE = max(320, int(os.getenv("PHOTO_THUMBNAIL_MAX_EDGE", "1600")))
+DERIVATIVE_IMAGE_EXTENSION = ".avif"
+DERIVATIVE_IMAGE_QUALITY = min(100, max(1, int(os.getenv("DERIVATIVE_IMAGE_QUALITY", "42"))))
+DERIVATIVE_IMAGE_SPEED = min(10, max(0, int(os.getenv("DERIVATIVE_IMAGE_SPEED", "6"))))
+RAW_THUMBNAIL_MAX_EDGE = max(320, int(os.getenv("RAW_THUMBNAIL_MAX_EDGE", "960")))
+RAW_THUMBNAIL_QUALITY = min(100, max(1, int(os.getenv("RAW_THUMBNAIL_QUALITY", "36"))))
+RAW_EXTENSIONS = {".dng", ".arw", ".cr2", ".cr3", ".nef", ".raf", ".3fr", ".orf", ".rw2", ".pef"}
 
 TAG_CANDIDATES = {
     "portrait": "肖像",
@@ -118,6 +128,7 @@ class AnalyzeResponse(BaseModel):
     vector: list[float]
     tags: list[str]
     dominant_color: str = Field(alias="dominantColor")
+    timings_ms: dict[str, float] = Field(default_factory=dict, alias="timingsMs")
 
 
 class AnalyzeMediaRequest(BaseModel):
@@ -152,6 +163,7 @@ class AnalyzeMediaResponse(BaseModel):
     tags: list[str] = Field(default_factory=list)
     metadata: dict = Field(default_factory=dict)
     segments: list[MediaSegmentResponse] = Field(default_factory=list)
+    timings_ms: dict[str, float] = Field(default_factory=dict, alias="timingsMs")
 
 
 @lru_cache(maxsize=1)
@@ -187,6 +199,8 @@ def safe_thumbnail_path(value: str) -> Path:
     candidate = Path(value).expanduser().resolve()
     if not any(candidate.is_relative_to(root) for root in THUMBNAIL_ROOTS):
         raise HTTPException(status_code=403, detail="thumbnailPath is outside THUMBNAIL_ROOTS")
+    if candidate.suffix.lower() != DERIVATIVE_IMAGE_EXTENSION:
+        raise HTTPException(status_code=400, detail=f"thumbnailPath must end in {DERIVATIVE_IMAGE_EXTENSION}")
     candidate.parent.mkdir(parents=True, exist_ok=True, mode=0o750)
     resolved_parent = candidate.parent.resolve(strict=True)
     if not any(resolved_parent.is_relative_to(root) for root in THUMBNAIL_ROOTS):
@@ -197,24 +211,44 @@ def safe_thumbnail_path(value: str) -> Path:
 def load_image(path: Path) -> Image.Image:
     try:
         with Image.open(path) as image:
-            return image.convert("RGB")
+            return ImageOps.exif_transpose(image).convert("RGB")
     except (OSError, ValueError) as pillow_error:
         try:
             with rawpy.imread(str(path)) as raw:
+                try:
+                    preview = raw.extract_thumb()
+                    if preview.format == rawpy.ThumbFormat.JPEG:
+                        with Image.open(io.BytesIO(preview.data)) as image:
+                            return ImageOps.exif_transpose(image).convert("RGB")
+                    if preview.format == rawpy.ThumbFormat.BITMAP:
+                        return Image.fromarray(preview.data).convert("RGB")
+                except (rawpy.LibRawError, OSError, ValueError):
+                    pass
                 pixels = raw.postprocess(use_camera_wb=True, half_size=True, no_auto_bright=False)
                 return Image.fromarray(pixels).convert("RGB")
         except (rawpy.LibRawError, OSError, ValueError) as raw_error:
             raise HTTPException(status_code=422, detail=f"cannot decode {path}: {pillow_error}; RAW fallback: {raw_error}") from raw_error
 
 
-def save_thumbnail(image: Image.Image, destination: Path) -> None:
+def make_thumbnail(image: Image.Image, max_edge: int) -> Image.Image:
     thumbnail = image.copy()
-    thumbnail.thumbnail((1600, 1600), Image.Resampling.LANCZOS)
-    handle = tempfile.NamedTemporaryFile(dir=destination.parent, suffix=".jpg", delete=False)
+    thumbnail.thumbnail((max_edge, max_edge), Image.Resampling.LANCZOS)
+    return thumbnail
+
+
+def save_derivative(image: Image.Image, destination: Path, quality: int | None = None) -> None:
+    if not features.check("avif"):
+        raise HTTPException(status_code=503, detail="Pillow AVIF support is required for derivative images")
+    handle = tempfile.NamedTemporaryFile(dir=destination.parent, suffix=DERIVATIVE_IMAGE_EXTENSION, delete=False)
     temporary = Path(handle.name)
     handle.close()
     try:
-        thumbnail.save(temporary, format="JPEG", quality=86, optimize=True)
+        image.save(
+            temporary,
+            format="AVIF",
+            quality=quality if quality is not None else DERIVATIVE_IMAGE_QUALITY,
+            speed=DERIVATIVE_IMAGE_SPEED,
+        )
         os.chmod(temporary, 0o640)
         os.replace(temporary, destination)
     finally:
@@ -226,15 +260,35 @@ def dominant_color(image: Image.Image) -> str:
     return f"#{red:02x}{green:02x}{blue:02x}"
 
 
-def embed(paths: list[Path]) -> list[list[float]]:
+def make_video_thumbnail(images: list[Image.Image]) -> Image.Image:
+    selected = images[:2]
+    if len(selected) == 1:
+        return make_thumbnail(selected[0], VIDEO_KEYFRAME_MAX_EDGE)
+    height = max(180, round(VIDEO_KEYFRAME_MAX_EDGE * 9 / 16))
+    cell_width = VIDEO_KEYFRAME_MAX_EDGE // 2
+    canvas = Image.new("RGB", (VIDEO_KEYFRAME_MAX_EDGE, height), "black")
+    for index, image in enumerate(selected):
+        fitted = image.copy()
+        fitted.thumbnail((cell_width, height), Image.Resampling.LANCZOS)
+        x = index * cell_width + (cell_width - fitted.width) // 2
+        y = (height - fitted.height) // 2
+        canvas.paste(fitted, (x, y))
+    return canvas
+
+
+def embed_images(images: list[Image.Image]) -> list[list[float]]:
     model, preprocess = load_model()
-    tensors = [preprocess(load_image(path)) for path in paths]
+    tensors = [preprocess(image) for image in images]
 
     batch = torch.stack(tensors).to(DEVICE)
     with torch.inference_mode():
         vectors = model.encode_image(batch)
         vectors = vectors / vectors.norm(dim=-1, keepdim=True)
     return vectors.cpu().float().tolist()
+
+
+def embed(paths: list[Path]) -> list[list[float]]:
+    return embed_images([load_image(path) for path in paths])
 
 
 def classify(vector: list[float]) -> list[str]:
@@ -245,17 +299,6 @@ def classify(vector: list[float]) -> list[str]:
     labels = list(TAG_CANDIDATES.values())
     selected = [labels[index] for score, index in ranked if score >= AUTO_TAG_MIN_SCORE]
     return selected or [labels[ranked[0][1]]]
-
-
-def safe_output_dir(value: str) -> Path:
-    candidate = Path(value).expanduser().resolve()
-    if not any(candidate.is_relative_to(root) for root in THUMBNAIL_ROOTS):
-        raise HTTPException(status_code=403, detail="segmentDir is outside THUMBNAIL_ROOTS")
-    candidate.mkdir(parents=True, exist_ok=True, mode=0o750)
-    resolved = candidate.resolve(strict=True)
-    if not any(resolved.is_relative_to(root) for root in THUMBNAIL_ROOTS):
-        raise HTTPException(status_code=403, detail="segmentDir escapes THUMBNAIL_ROOTS")
-    return resolved
 
 
 def require_binary(name: str) -> str:
@@ -271,6 +314,10 @@ def run_command(arguments: list[str], operation: str) -> subprocess.CompletedPro
     except subprocess.CalledProcessError as error:
         detail = (error.stderr or error.stdout or str(error)).strip()[-1200:]
         raise HTTPException(status_code=422, detail=f"{operation} failed: {detail}") from error
+
+
+def elapsed_ms(started: float) -> float:
+    return round((time.perf_counter() - started) * 1000, 3)
 
 
 def probe_media(path: Path) -> dict:
@@ -331,11 +378,54 @@ def ffmpeg_extract_frame(source: Path, seconds: float, destination: Path) -> Non
     run_command(
         [
             require_binary("ffmpeg"), "-v", "error", "-y", "-ss", f"{seconds:.3f}", "-i", str(source),
-            "-frames:v", "1", "-vf", "scale=1600:-2:force_original_aspect_ratio=decrease", "-q:v", "2", str(destination),
+            "-frames:v", "1", "-vf", video_keyframe_filter(), "-q:v", "2", str(destination),
         ],
         "video frame extraction",
     )
+    if not destination.is_file():
+        run_command(
+            [
+                require_binary("ffmpeg"), "-v", "error", "-y", "-sseof", "-1", "-i", str(source),
+                "-frames:v", "1", "-vf", video_keyframe_filter(), "-q:v", "2", str(destination),
+            ],
+            "video tail frame extraction",
+        )
+    if not destination.is_file():
+        raise HTTPException(status_code=422, detail="video frame extraction produced no image")
     os.chmod(destination, 0o640)
+
+
+def video_keyframe_filter() -> str:
+    edge = VIDEO_KEYFRAME_MAX_EDGE
+    return (
+        f"scale='min({edge},iw)':'min({edge},ih)':"
+        "force_original_aspect_ratio=decrease:force_divisible_by=2"
+    )
+
+
+def ffmpeg_extract_frames(source: Path, timestamps_ms: list[int], destination: Path) -> list[Path]:
+    destination.mkdir(parents=True, exist_ok=True, mode=0o750)
+    if len(timestamps_ms) == 1:
+        frame = destination / "frame-000000.jpg"
+        ffmpeg_extract_frame(source, timestamps_ms[0] / 1000, frame)
+        return [frame]
+    output_pattern = destination / "frame-%06d.jpg"
+    run_command(
+        [
+            require_binary("ffmpeg"), "-v", "error", "-y",
+            "-ss", f"{timestamps_ms[0] / 1000:.3f}", "-i", str(source),
+            "-vf", f"fps=1/{VIDEO_SAMPLE_SECONDS}:round=up:eof_action=pass,{video_keyframe_filter()}",
+            "-frames:v", str(len(timestamps_ms)), "-q:v", "2", "-start_number", "0", str(output_pattern),
+        ],
+        "video frame extraction",
+    )
+    frames = [destination / f"frame-{index:06d}.jpg" for index in range(len(timestamps_ms))]
+    for index, frame in enumerate(frames):
+        if not frame.is_file():
+            ffmpeg_extract_frame(source, timestamps_ms[index] / 1000, frame)
+    for frame in frames:
+        os.chmod(frame, 0o640)
+    return frames
 
 
 def ffmpeg_extract_audio(source: Path, destination: Path, start_seconds: float | None = None, duration_seconds: float | None = None) -> None:
@@ -347,19 +437,6 @@ def ffmpeg_extract_audio(source: Path, destination: Path, start_seconds: float |
         arguments += ["-t", f"{duration_seconds:.3f}"]
     arguments += ["-vn", "-ac", "1", "-ar", "48000", "-c:a", "pcm_s16le", str(destination)]
     run_command(arguments, "audio extraction")
-
-
-def ffmpeg_waveform(source: Path, destination: Path) -> None:
-    destination.parent.mkdir(parents=True, exist_ok=True, mode=0o750)
-    run_command(
-        [
-            require_binary("ffmpeg"), "-v", "error", "-y", "-i", str(source),
-            "-filter_complex", "aformat=channel_layouts=mono,showwavespic=s=1600x900:colors=#b24a31",
-            "-frames:v", "1", str(destination),
-        ],
-        "audio waveform generation",
-    )
-    os.chmod(destination, 0o640)
 
 
 @lru_cache(maxsize=1)
@@ -447,32 +524,72 @@ def overlapping_transcript(start_ms: int, end_ms: int, transcript_segments: list
     ).strip()
 
 
-def visual_segments(source: Path, duration_ms: int, segment_dir: Path) -> list[MediaSegmentResponse]:
+def visual_segments(
+    source: Path,
+    duration_ms: int,
+    temporary_dir: Path,
+    thumbnail_path: Path | None,
+    auto_tags: bool,
+) -> tuple[list[MediaSegmentResponse], dict[str, float]]:
     if duration_ms <= 0:
         timestamps = [0]
     else:
         count = min(MAX_VIDEO_SEGMENTS, max(1, (duration_ms + VIDEO_SAMPLE_SECONDS * 1000 - 1) // (VIDEO_SAMPLE_SECONDS * 1000)))
-        timestamps = [min(duration_ms - 1, index * VIDEO_SAMPLE_SECONDS * 1000 + VIDEO_SAMPLE_SECONDS * 500) for index in range(count)]
-    frame_paths = []
-    for index, timestamp in enumerate(timestamps):
-        frame_path = segment_dir / f"frame-{index:06d}.jpg"
-        ffmpeg_extract_frame(source, timestamp / 1000, frame_path)
-        frame_paths.append(frame_path)
+        interval_ms = VIDEO_SAMPLE_SECONDS * 1000
+        latest_safe_ms = max(0, duration_ms - 1000)
+        timestamps = [min(latest_safe_ms, index * interval_ms + interval_ms // 2) for index in range(count)]
+    stage_started = time.perf_counter()
+    frame_paths = ffmpeg_extract_frames(source, timestamps, temporary_dir)
+    extraction_ms = elapsed_ms(stage_started)
+
     vectors = []
+    decoding_ms = 0.0
+    embedding_ms = 0.0
+    thumbnail_compose_ms = 0.0
+    thumbnail_encode_ms = 0.0
+    thumbnail_indexes = {0, len(frame_paths) // 2} if len(frame_paths) > 1 else {0}
+    thumbnail_candidates: dict[int, Image.Image] = {}
     for offset in range(0, len(frame_paths), 16):
-        vectors.extend(embed(frame_paths[offset:offset + 16]))
+        batch_paths = frame_paths[offset:offset + 16]
+        stage_started = time.perf_counter()
+        images = [load_image(path) for path in batch_paths]
+        decoding_ms += elapsed_ms(stage_started)
+        for batch_index, image in enumerate(images):
+            global_index = offset + batch_index
+            if global_index in thumbnail_indexes:
+                thumbnail_candidates[global_index] = image.copy()
+        stage_started = time.perf_counter()
+        vectors.extend(embed_images(images))
+        embedding_ms += elapsed_ms(stage_started)
+
+    if thumbnail_path is not None and thumbnail_candidates:
+        stage_started = time.perf_counter()
+        thumbnail = make_video_thumbnail([thumbnail_candidates[index] for index in sorted(thumbnail_candidates)])
+        thumbnail_compose_ms = elapsed_ms(stage_started)
+        stage_started = time.perf_counter()
+        save_derivative(thumbnail, thumbnail_path)
+        thumbnail_encode_ms = elapsed_ms(stage_started)
+
+    stage_started = time.perf_counter()
     segments = []
-    for index, (timestamp, frame_path, vector) in enumerate(zip(timestamps, frame_paths, vectors)):
+    for index, vector in enumerate(vectors):
         start_ms = index * VIDEO_SAMPLE_SECONDS * 1000
         end_ms = min(duration_ms, start_ms + VIDEO_SAMPLE_SECONDS * 1000) if duration_ms else start_ms
         segments.append(MediaSegmentResponse(
             segmentType="visual", index=index, startMs=start_ms, endMs=max(start_ms, end_ms),
-            keyframePath=str(frame_path), tags=classify(vector), visualVector=vector,
+            keyframePath="", tags=classify(vector) if auto_tags else [], visualVector=vector,
         ))
-    return segments
+    return segments, {
+        "keyframeExtractionMs": extraction_ms,
+        "visualDecodingMs": round(decoding_ms, 3),
+        "visualEmbeddingMs": round(embedding_ms, 3),
+        "thumbnailComposeMs": thumbnail_compose_ms,
+        "thumbnailEncodeMs": thumbnail_encode_ms,
+        "visualTaggingMs": elapsed_ms(stage_started),
+    }
 
 
-def audio_segments(source_audio: Path, duration_ms: int, transcript_segments: list[dict], temporary_dir: Path) -> list[MediaSegmentResponse]:
+def audio_segments(source_audio: Path, duration_ms: int, transcript_segments: list[dict], temporary_dir: Path, auto_tags: bool) -> tuple[list[MediaSegmentResponse], dict[str, float]]:
     if duration_ms <= 0:
         intervals = [(0, AUDIO_SEGMENT_SECONDS * 1000)]
     else:
@@ -481,20 +598,32 @@ def audio_segments(source_audio: Path, duration_ms: int, transcript_segments: li
             (index * AUDIO_SEGMENT_SECONDS * 1000, min(duration_ms, (index + 1) * AUDIO_SEGMENT_SECONDS * 1000))
             for index in range(count)
         ]
+    stage_started = time.perf_counter()
     chunks = []
     for index, (start_ms, end_ms) in enumerate(intervals):
         chunk = temporary_dir / f"audio-{index:06d}.wav"
         ffmpeg_extract_audio(source_audio, chunk, start_ms / 1000, max(0.001, (end_ms - start_ms) / 1000))
         chunks.append(chunk)
+    chunking_ms = elapsed_ms(stage_started)
+
+    stage_started = time.perf_counter()
     vectors = embed_audio_files(chunks)
-    return [
+    embedding_ms = elapsed_ms(stage_started)
+
+    stage_started = time.perf_counter()
+    segments = [
         MediaSegmentResponse(
             segmentType="audio", index=index, startMs=start_ms, endMs=end_ms,
             transcript=overlapping_transcript(start_ms, end_ms, transcript_segments),
-            tags=classify_audio(vector), audioVector=vector,
+            tags=classify_audio(vector) if auto_tags else [], audioVector=vector,
         )
         for index, ((start_ms, end_ms), vector) in enumerate(zip(intervals, vectors))
     ]
+    return segments, {
+        "audioChunkingMs": chunking_ms,
+        "audioEmbeddingMs": embedding_ms,
+        "audioTaggingMs": elapsed_ms(stage_started),
+    }
 
 
 def merge_unique_tags(groups: list[list[str]], limit: int = 12) -> list[str]:
@@ -525,8 +654,21 @@ def health() -> dict:
         "dependencies": {
             "ffmpeg": bool(shutil.which("ffmpeg")),
             "ffprobe": bool(shutil.which("ffprobe")),
+            "avif": features.check("avif"),
             "whisper": WHISPER_INSTALLED,
             "clap": CLAP_INSTALLED,
+        },
+        "derivativeImages": {
+            "format": "avif",
+            "quality": DERIVATIVE_IMAGE_QUALITY,
+            "speed": DERIVATIVE_IMAGE_SPEED,
+            "photoMaxEdge": PHOTO_THUMBNAIL_MAX_EDGE,
+            "rawMaxEdge": RAW_THUMBNAIL_MAX_EDGE,
+            "rawQuality": RAW_THUMBNAIL_QUALITY,
+            "videoMaxEdge": VIDEO_KEYFRAME_MAX_EDGE,
+            "videoThumbnailFrames": 2,
+            "persistentVideoKeyframes": False,
+            "audioThumbnails": False,
         },
     }
 
@@ -544,25 +686,63 @@ def create_embeddings(request: EmbedRequest) -> EmbedResponse:
 
 @app.post("/v1/analyze", response_model=AnalyzeResponse)
 def analyze_photo(request: AnalyzeRequest) -> AnalyzeResponse:
+    total_started = time.perf_counter()
     path = safe_path(request.path)
+
+    stage_started = time.perf_counter()
     image = load_image(path)
-    vector = embed([path])[0]
+    decode_ms = elapsed_ms(stage_started)
+
+    stage_started = time.perf_counter()
+    vector = embed_images([image])[0]
+    embedding_ms = elapsed_ms(stage_started)
+
+    thumbnail_resize_ms = 0.0
+    thumbnail_encode_ms = 0.0
     if request.thumbnail_path:
-        save_thumbnail(image, safe_thumbnail_path(request.thumbnail_path))
+        is_raw = path.suffix.lower() in RAW_EXTENSIONS
+        max_edge = RAW_THUMBNAIL_MAX_EDGE if is_raw else PHOTO_THUMBNAIL_MAX_EDGE
+        quality = RAW_THUMBNAIL_QUALITY if is_raw else DERIVATIVE_IMAGE_QUALITY
+        stage_started = time.perf_counter()
+        thumbnail = make_thumbnail(image, max_edge)
+        thumbnail_resize_ms = elapsed_ms(stage_started)
+        stage_started = time.perf_counter()
+        save_derivative(thumbnail, safe_thumbnail_path(request.thumbnail_path), quality=quality)
+        thumbnail_encode_ms = elapsed_ms(stage_started)
+
+    stage_started = time.perf_counter()
+    color = dominant_color(image)
+    dominant_color_ms = elapsed_ms(stage_started)
+
+    stage_started = time.perf_counter()
+    tags = classify(vector)
+    tagging_ms = elapsed_ms(stage_started)
     return AnalyzeResponse(
         vector=vector,
-        tags=classify(vector),
-        dominantColor=dominant_color(image),
+        tags=tags,
+        dominantColor=color,
+        timingsMs={
+            "decodeMs": decode_ms,
+            "embeddingMs": embedding_ms,
+            "thumbnailResizeMs": thumbnail_resize_ms,
+            "thumbnailEncodeMs": thumbnail_encode_ms,
+            "thumbnailMs": round(thumbnail_resize_ms + thumbnail_encode_ms, 3),
+            "dominantColorMs": dominant_color_ms,
+            "taggingMs": tagging_ms,
+            "totalMs": elapsed_ms(total_started),
+        },
     )
 
 
 @app.post("/v1/analyze-media", response_model=AnalyzeMediaResponse)
 def analyze_media(request: AnalyzeMediaRequest) -> AnalyzeMediaResponse:
+    total_started = time.perf_counter()
     path = safe_path(request.path)
+
+    stage_started = time.perf_counter()
     probe = probe_media(path)
     description = media_description(path, probe)
-    if description["media_type"] == "video" and not request.segment_dir:
-        raise HTTPException(status_code=400, detail="segmentDir is required for video analysis")
+    timings = {"probeMs": elapsed_ms(stage_started)}
 
     visual = []
     audio = []
@@ -571,27 +751,38 @@ def analyze_media(request: AnalyzeMediaRequest) -> AnalyzeMediaResponse:
     with tempfile.TemporaryDirectory(prefix="apofocus-media-") as temporary_value:
         temporary_dir = Path(temporary_value)
         if description["media_type"] == "video":
-            segment_dir = safe_output_dir(request.segment_dir)
-            visual = visual_segments(path, description["duration_ms"], segment_dir)
-            if request.thumbnail_path and visual:
-                thumbnail_path = safe_thumbnail_path(request.thumbnail_path)
-                shutil.copyfile(visual[0].keyframe_path, thumbnail_path)
-                os.chmod(thumbnail_path, 0o640)
-        elif request.thumbnail_path:
-            ffmpeg_waveform(path, safe_thumbnail_path(request.thumbnail_path))
-
+            thumbnail_path = safe_thumbnail_path(request.thumbnail_path) if request.thumbnail_path else None
+            visual, visual_timings = visual_segments(
+                path, description["duration_ms"], temporary_dir / "visual", thumbnail_path, request.auto_tags
+            )
+            timings.update(visual_timings)
+            timings["thumbnailMs"] = round(
+                timings.get("thumbnailComposeMs", 0.0) + timings.get("thumbnailEncodeMs", 0.0), 3
+            )
         if description["has_audio"]:
+            stage_started = time.perf_counter()
             normalized_audio = temporary_dir / "source.wav"
             ffmpeg_extract_audio(path, normalized_audio)
-            transcript, transcript_segments = transcribe_audio(normalized_audio)
-            audio = audio_segments(normalized_audio, description["duration_ms"], transcript_segments, temporary_dir)
+            timings["audioExtractMs"] = elapsed_ms(stage_started)
 
+            stage_started = time.perf_counter()
+            transcript, transcript_segments = transcribe_audio(normalized_audio)
+            timings["transcriptionMs"] = elapsed_ms(stage_started)
+
+            audio, audio_timings = audio_segments(
+                normalized_audio, description["duration_ms"], transcript_segments, temporary_dir, request.auto_tags
+            )
+            timings.update(audio_timings)
+
+    stage_started = time.perf_counter()
     automatic_tags = merge_unique_tags(
         [segment.tags for segment in visual] + [segment.tags for segment in audio]
     ) if request.auto_tags else []
+    timings["tagMergeMs"] = elapsed_ms(stage_started)
     # ffprobe echoes the absolute source filename. Keep the useful technical
     # metadata without persisting or returning the machine's storage layout.
     probe.get("format", {}).pop("filename", None)
+    timings["totalMs"] = elapsed_ms(total_started)
     return AnalyzeMediaResponse(
         mediaType=description["media_type"],
         durationMs=description["duration_ms"],
@@ -610,6 +801,13 @@ def analyze_media(request: AnalyzeMediaRequest) -> AnalyzeMediaResponse:
                 "speech": f"whisper/{WHISPER_MODEL}" if description["has_audio"] else "",
                 "audio": "laion-clap" if audio else "",
             },
+            "derivativeImages": {
+                "format": "avif",
+                "videoThumbnailFrames": 2,
+                "persistentVideoKeyframes": False,
+                "audioThumbnails": False,
+            },
         },
         segments=visual + audio,
+        timingsMs=timings,
     )

@@ -13,6 +13,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/hcchien/apofocus/internal/backup"
 	"github.com/hcchien/apofocus/internal/batch"
 	"github.com/hcchien/apofocus/internal/catalog"
 	"github.com/hcchien/apofocus/internal/folders"
@@ -29,6 +30,7 @@ func main() {
 	libraryRoot := required(logger, "PHOTO_LIBRARY_ROOT")
 	importRoots := splitPaths(required(logger, "APOFOCUS_IMPORT_ROOTS"))
 	embeddingURL := envOr("EMBEDDING_SERVICE_URL", "http://127.0.0.1:8090")
+	backupOperations := configuredBackup()
 
 	db, err := sql.Open("pgx", databaseURL)
 	if err != nil {
@@ -45,7 +47,7 @@ func main() {
 		serverContext, stop := context.WithCancel(context.Background())
 		defer stop()
 		server := mcpserver.NewWithOptions(mcpserver.Options{
-			Maintenance: maintenanceManager, ImportRoots: importRoots, LibraryRoot: libraryRoot,
+			Maintenance: maintenanceManager, Backup: backupOperations, ImportRoots: importRoots, LibraryRoot: libraryRoot,
 		})
 		if err := server.Run(serverContext, &mcp.StdioTransport{}); err != nil {
 			logger.Error("run maintenance MCP server", "error", err)
@@ -99,12 +101,25 @@ func main() {
 	server := mcpserver.NewWithOptions(mcpserver.Options{
 		PhotoImporter: manager, MediaImporter: mediaManager, Photos: photoStore, Media: photoStore,
 		Folders: folderRepository, BatchJobs: batchJobs, Maintenance: maintenanceManager,
+		Backup:      backupOperations,
 		ImportRoots: importRoots, LibraryRoot: libraryRoot,
 	})
 	if err := server.Run(serverContext, &mcp.StdioTransport{}); err != nil {
 		logger.Error("run MCP server", "error", err)
 		os.Exit(1)
 	}
+}
+
+func configuredBackup() backup.Operations {
+	root := strings.TrimSpace(os.Getenv("APOFOCUS_BACKUP_ROOT"))
+	if root == "" {
+		return nil
+	}
+	statusPath := strings.TrimSpace(os.Getenv("APOFOCUS_BACKUP_STATUS"))
+	if statusPath == "" {
+		statusPath = filepath.Join(filepath.Dir(root), "backup-status.json")
+	}
+	return backup.NewMonitor(root, statusPath, strings.TrimSpace(os.Getenv("APOFOCUS_BACKUP_VOLUME_UUID")))
 }
 
 func required(logger *slog.Logger, name string) string {

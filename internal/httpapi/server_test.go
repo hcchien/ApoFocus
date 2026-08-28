@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -69,10 +71,30 @@ func TestServesEmbeddedApp(t *testing.T) {
 	if !strings.Contains(response.Body.String(), "ApoFocus") {
 		t.Fatal("embedded app title was not served")
 	}
-	for _, marker := range []string{`role="tablist"`, `data-media="photos"`, `data-media="videos"`, `data-media="audios"`} {
+	for _, marker := range []string{`role="tablist"`, `data-media="photos"`, `data-media="videos"`, `data-media="audios"`, `class="audio-artwork detail-audio-artwork"`} {
 		if !strings.Contains(response.Body.String(), marker) {
 			t.Fatalf("embedded app is missing media tab marker %q", marker)
 		}
+	}
+	if strings.Contains(response.Body.String(), `id="detail-audio-image"`) {
+		t.Fatal("audio detail should not depend on a thumbnail image")
+	}
+}
+
+func TestServesAVIFWithExplicitContentType(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "thumbnail.avif"), []byte("avif"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	server := NewWithMedia(catalog.NewMemoryStore(), slog.New(slog.NewTextHandler(io.Discard, nil)), root)
+	request := httptest.NewRequest(http.MethodGet, "/media/thumbnail.avif", nil)
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", response.Code)
+	}
+	if contentType := response.Header().Get("Content-Type"); contentType != "image/avif" {
+		t.Fatalf("unexpected Content-Type: %q", contentType)
 	}
 }
 

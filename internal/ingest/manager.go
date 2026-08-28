@@ -66,6 +66,7 @@ func (m *Manager) Inspect(ctx context.Context, request ImportRequest) (Inspectio
 		}
 		inspection.SuggestedTags = mergeTags(request.Tags, analysis.Tags)
 		inspection.DominantColor = analysis.DominantColor
+		inspection.AnalysisTimings = analysis.TimingsMS
 	} else {
 		inspection.SuggestedTags = mergeTags(request.Tags, nil)
 	}
@@ -128,6 +129,7 @@ func (m *Manager) Import(ctx context.Context, request ImportRequest) (ImportResu
 	}
 	inspection.embedding = analysis.Embedding
 	inspection.DominantColor = analysis.DominantColor
+	inspection.AnalysisTimings = analysis.TimingsMS
 	if request.AutoTags {
 		inspection.SuggestedTags = mergeTags(request.Tags, analysis.Tags)
 	} else {
@@ -179,7 +181,7 @@ func (m *Manager) Import(ctx context.Context, request ImportRequest) (ImportResu
 	}
 	return ImportResult{
 		PhotoID: photoID, Path: originalPath, ThumbnailPath: thumbnailPath,
-		Tags: record.Tags, VectorDimensions: len(inspection.embedding),
+		Tags: record.Tags, VectorDimensions: len(inspection.embedding), AnalysisTimings: inspection.AnalysisTimings,
 	}, nil
 }
 
@@ -265,7 +267,7 @@ func (m *Manager) destinationPaths(inspection Inspection) (string, string) {
 	}
 	extension := strings.ToLower(filepath.Ext(inspection.Filename))
 	filename := fmt.Sprintf("%s_%s_%s%s", datePrefix, base, inspection.ContentSHA256[:10], extension)
-	thumbnail := strings.TrimSuffix(filename, extension) + ".jpg"
+	thumbnail := strings.TrimSuffix(filename, extension) + ".avif"
 	year := fmt.Sprintf("%04d", inspection.Year)
 	return filepath.Join(m.libraryRoot, "originals", year, project, filename),
 		filepath.Join(m.libraryRoot, "thumbnails", year, project, thumbnail)

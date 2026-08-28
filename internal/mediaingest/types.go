@@ -14,25 +14,26 @@ type ImportRequest struct {
 }
 
 type Inspection struct {
-	SourcePath        string         `json:"sourcePath"`
-	ContentSHA256     string         `json:"contentSha256"`
-	MediaType         string         `json:"mediaType"`
-	Title             string         `json:"title"`
-	Project           string         `json:"project"`
-	RecordedAt        time.Time      `json:"recordedAt"`
-	SuggestedFolder   string         `json:"suggestedFolder"`
-	DurationMS        int64          `json:"durationMs"`
-	MimeType          string         `json:"mimeType"`
-	Codec             string         `json:"codec"`
-	Dimensions        string         `json:"dimensions,omitempty"`
-	SampleRate        int            `json:"sampleRate,omitempty"`
-	Channels          int            `json:"channels,omitempty"`
-	SuggestedTags     []string       `json:"suggestedTags"`
-	TranscriptPreview string         `json:"transcriptPreview,omitempty"`
-	SegmentCount      int            `json:"segmentCount"`
-	VisualVectorCount int            `json:"visualVectorCount"`
-	AudioVectorCount  int            `json:"audioVectorCount"`
-	Metadata          map[string]any `json:"metadata,omitempty"`
+	SourcePath        string             `json:"sourcePath"`
+	ContentSHA256     string             `json:"contentSha256"`
+	MediaType         string             `json:"mediaType"`
+	Title             string             `json:"title"`
+	Project           string             `json:"project"`
+	RecordedAt        time.Time          `json:"recordedAt"`
+	SuggestedFolder   string             `json:"suggestedFolder"`
+	DurationMS        int64              `json:"durationMs"`
+	MimeType          string             `json:"mimeType"`
+	Codec             string             `json:"codec"`
+	Dimensions        string             `json:"dimensions,omitempty"`
+	SampleRate        int                `json:"sampleRate,omitempty"`
+	Channels          int                `json:"channels,omitempty"`
+	SuggestedTags     []string           `json:"suggestedTags"`
+	TranscriptPreview string             `json:"transcriptPreview,omitempty"`
+	SegmentCount      int                `json:"segmentCount"`
+	VisualVectorCount int                `json:"visualVectorCount"`
+	AudioVectorCount  int                `json:"audioVectorCount"`
+	Metadata          map[string]any     `json:"metadata,omitempty"`
+	AnalysisTimings   map[string]float64 `json:"analysisTimingsMs,omitempty"`
 }
 
 type Segment struct {
@@ -52,18 +53,19 @@ type Segment struct {
 }
 
 type Analysis struct {
-	MediaType  string         `json:"mediaType"`
-	DurationMS int64          `json:"durationMs"`
-	MimeType   string         `json:"mimeType"`
-	Codec      string         `json:"codec"`
-	Dimensions string         `json:"dimensions"`
-	SampleRate int            `json:"sampleRate"`
-	Channels   int            `json:"channels"`
-	RecordedAt string         `json:"recordedAt"`
-	Transcript string         `json:"transcript"`
-	Tags       []string       `json:"tags"`
-	Metadata   map[string]any `json:"metadata"`
-	Segments   []Segment      `json:"segments"`
+	MediaType  string             `json:"mediaType"`
+	DurationMS int64              `json:"durationMs"`
+	MimeType   string             `json:"mimeType"`
+	Codec      string             `json:"codec"`
+	Dimensions string             `json:"dimensions"`
+	SampleRate int                `json:"sampleRate"`
+	Channels   int                `json:"channels"`
+	RecordedAt string             `json:"recordedAt"`
+	Transcript string             `json:"transcript"`
+	Tags       []string           `json:"tags"`
+	Metadata   map[string]any     `json:"metadata"`
+	Segments   []Segment          `json:"segments"`
+	TimingsMS  map[string]float64 `json:"timingsMs"`
 }
 
 type Analyzer interface {
@@ -111,12 +113,13 @@ type Repository interface {
 }
 
 type ImportResult struct {
-	AssetID          string   `json:"assetId"`
-	MediaType        string   `json:"mediaType"`
-	Path             string   `json:"path"`
-	ThumbnailPath    string   `json:"thumbnailPath"`
-	Tags             []string `json:"tags"`
-	AlreadyExists    bool     `json:"alreadyExists"`
-	SegmentCount     int      `json:"segmentCount"`
-	TranscriptLength int      `json:"transcriptLength"`
+	AssetID          string             `json:"assetId"`
+	MediaType        string             `json:"mediaType"`
+	Path             string             `json:"path"`
+	ThumbnailPath    string             `json:"thumbnailPath"`
+	Tags             []string           `json:"tags"`
+	AlreadyExists    bool               `json:"alreadyExists"`
+	SegmentCount     int                `json:"segmentCount"`
+	TranscriptLength int                `json:"transcriptLength"`
+	AnalysisTimings  map[string]float64 `json:"analysisTimingsMs,omitempty"`
 }

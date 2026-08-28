@@ -132,6 +132,9 @@ h1 { margin: 0; font-family: "Iowan Old Style", "Noto Serif TC", Georgia, serif;
 .photo-card { grid-row: span 16; position: relative; border: 0; border-radius: 4px; padding: 0; background: #d8d7cf; overflow: hidden; cursor: zoom-in; text-align: left; box-shadow: 0 1px 0 rgba(0,0,0,.03); }
 .photo-card.portrait { grid-row: span 25; }
 .media-card { grid-row: span 18; cursor: pointer; }
+.audio-artwork { width: 100%; height: 100%; display: grid; place-content: center; gap: 8px; text-align: center; color: rgba(255,255,255,.9); background: radial-gradient(circle at 35% 28%, #775449, #292924 58%, #181815); }
+.audio-artwork strong { font-family: Georgia, serif; font-size: 58px; font-weight: 400; line-height: 1; }
+.audio-artwork small { font-size: 9px; letter-spacing: .18em; text-transform: uppercase; opacity: .62; }
 .media-kind { position: absolute; z-index: 2; left: 14px; top: 13px; width: 31px; height: 31px; display: grid; place-items: center; border-radius: 50%; background: rgba(20,20,17,.62); color: white; font-size: 11px; backdrop-filter: blur(7px); }
 .media-card .card-badge { opacity: 1; }
 .photo-card img { width: 100%; height: 100%; display: block; object-fit: cover; transition: transform .55s cubic-bezier(.2,.8,.2,1), filter .3s; }
@@ -164,7 +167,7 @@ dialog::backdrop { background: rgba(20,20,17,.72); backdrop-filter: blur(5px); }
 .detail-visual img { width: 100%; height: 100%; object-fit: contain; }
 .media-player video { width: 100%; height: 100%; background: #111; }
 .audio-player { width: min(680px, 86%); display: grid; gap: 20px; }
-.audio-player img { width: 100%; aspect-ratio: 16/9; border-radius: 8px; object-fit: cover; background: #292924; }
+.audio-player .detail-audio-artwork { width: 100%; height: auto; aspect-ratio: 16/9; border-radius: 8px; }
 .audio-player audio { width: 100%; }
 .transcript-section p, .segment-summary { margin: 0; color: var(--muted); font-size: 10.5px; line-height: 1.8; white-space: pre-wrap; }
 .detail-nav { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; padding: 4px; border-radius: 999px; background: rgba(20,20,17,.64); color: white; backdrop-filter: blur(8px); }

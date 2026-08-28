@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 
+	"github.com/hcchien/apofocus/internal/backup"
 	"github.com/hcchien/apofocus/internal/batch"
 	"github.com/hcchien/apofocus/internal/catalog"
 	"github.com/hcchien/apofocus/internal/folders"
@@ -33,6 +34,7 @@ type Options struct {
 	Folders       folders.Repository
 	BatchJobs     BatchJobs
 	Maintenance   maintenance.Checker
+	Backup        backup.Operations
 	ImportRoots   []string
 	LibraryRoot   string
 }

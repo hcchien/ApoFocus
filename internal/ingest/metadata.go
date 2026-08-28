@@ -38,13 +38,12 @@ func readMetadata(path string, fallbackTime time.Time) (Inspection, error) {
 		AspectRatio:   "landscape",
 	}
 
+	pixelWidth, pixelHeight := 0, 0
 	if config, _, err := image.DecodeConfig(file); err == nil {
-		result.Dimensions = fmt.Sprintf("%d × %d", config.Width, config.Height)
-		if config.Height > config.Width {
-			result.AspectRatio = "portrait"
-		}
-		result.Metadata["width"] = config.Width
-		result.Metadata["height"] = config.Height
+		pixelWidth, pixelHeight = config.Width, config.Height
+		setDisplayDimensions(&result, pixelWidth, pixelHeight)
+		result.Metadata["pixelWidth"] = pixelWidth
+		result.Metadata["pixelHeight"] = pixelHeight
 	}
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return Inspection{}, err
@@ -56,6 +55,13 @@ func readMetadata(path string, fallbackTime time.Time) (Inspection, error) {
 	if takenAt, err := x.DateTime(); err == nil {
 		result.TakenAt = takenAt
 		result.Year = takenAt.Year()
+	}
+	if tag, err := x.Get(exif.Orientation); err == nil {
+		if orientation, err := tag.Int(0); err == nil {
+			result.Metadata["orientation"] = orientation
+			width, height := orientedDimensions(pixelWidth, pixelHeight, orientation)
+			setDisplayDimensions(&result, width, height)
+		}
 	}
 	result.Camera = exifString(x, exif.Model)
 	result.Lens = exifString(x, exif.LensModel)
@@ -75,6 +81,26 @@ func readMetadata(path string, fallbackTime time.Time) (Inspection, error) {
 	}
 	result.Metadata["exifParsed"] = true
 	return result, nil
+}
+
+func orientedDimensions(width, height, orientation int) (int, int) {
+	if orientation >= 5 && orientation <= 8 {
+		return height, width
+	}
+	return width, height
+}
+
+func setDisplayDimensions(result *Inspection, width, height int) {
+	if width <= 0 || height <= 0 {
+		return
+	}
+	result.Dimensions = fmt.Sprintf("%d × %d", width, height)
+	result.AspectRatio = "landscape"
+	if height > width {
+		result.AspectRatio = "portrait"
+	}
+	result.Metadata["width"] = width
+	result.Metadata["height"] = height
 }
 
 func exifString(x *exif.Exif, field exif.FieldName) string {

@@ -23,6 +23,7 @@ ApoFocus 是為職業攝影師設計的照片、影片與音訊索引網站。Go
 - 外接硬碟／整個 Volume 批次整理、SSE 即時進度、逐張錯誤與中止功能
 - Managed library filesystem watcher：檔案改名或在 library 內搬動時，自動修正 DB path；遺失與磁碟離線狀態會顯示在 UI
 - macOS 0-to-1 installer：Homebrew dependencies、專用 PostgreSQL/pgvector、Python models、Go binaries 與 LaunchAgents
+- 外接碟 PostgreSQL 自動備份：Volume UUID 防呆、每日壓縮備份、7 日／4 週／6 月保留政策、每月實際還原測試與 MCP 維運
 
 ## 系統邊界
 
@@ -55,8 +56,9 @@ Installer 可重複執行，會完成：
 3. 在 `~/Library/Application Support/ApoFocus` 建立獨立 PostgreSQL cluster、隨機本機密碼、Python venv、model cache 與 Go binaries，不會使用或修改既有 PostgreSQL database。
 4. 依目前 schema 狀態安全套用尚未安裝的 migrations。
 5. 預先下載並載入驗證 OpenCLIP、Whisper base 與 LAION-CLAP。
-6. 安裝 `com.apofocus.postgres`、`com.apofocus.embedding`、`com.apofocus.web` 三個 LaunchAgents，登入後自動啟動並在失敗時重啟。
-7. 驗證 PostgreSQL/pgvector、embedding health endpoint 與 Web API。
+6. 安裝 `com.apofocus.postgres`、`com.apofocus.embedding`、`com.apofocus.web` 三個常駐 LaunchAgents，登入後自動啟動並在失敗時重啟。
+7. 若提供 `--backup-root`，另安裝每日備份與每月還原驗證兩個非持續常駐 LaunchAgents，並在安裝後背景執行第一次備份與還原測試。
+8. 驗證 PostgreSQL/pgvector、embedding health endpoint 與 Web API。
 
 預設位置：
 
@@ -76,6 +78,15 @@ bash scripts/install_macos.sh \
   --library-root "/Volumes/PHOTO_DISK/ApoFocus Library"
 ```
 
+若要把 PostgreSQL 備份放在外接 APFS Volume：
+
+```bash
+bash scripts/install_macos.sh \
+  --backup-root "/Volumes/ApoFocusBackup/PostgreSQL"
+```
+
+`--backup-root` 必須位於 `/Volumes` 下。Installer 會記住最外層 Volume UUID；排程執行時若硬碟未掛載、掛載成同名的另一顆硬碟，或只剩內建碟上的同名 mount point，會拒絕寫入。若同一顆外接裝置也作為 Time Machine 目的地，請建立獨立的 APFS Volume 給 ApoFocus，不要直接把 dump 寫進 Time Machine Volume。
+
 其他常用選項：
 
 ```bash
@@ -93,11 +104,28 @@ bash scripts/install_macos.sh --postgres-port 55433
 "$HOME/Library/Application Support/ApoFocus/bin/apofocusctl" doctor
 "$HOME/Library/Application Support/ApoFocus/bin/apofocusctl" status
 "$HOME/Library/Application Support/ApoFocus/bin/apofocusctl" restart
+"$HOME/Library/Application Support/ApoFocus/bin/apofocusctl" backup
+"$HOME/Library/Application Support/ApoFocus/bin/apofocusctl" verify-backup
 "$HOME/Library/Application Support/ApoFocus/bin/apofocusctl" logs
 "$HOME/Library/Application Support/ApoFocus/bin/apofocusctl" open
 ```
 
 外接硬碟、`Pictures` 或其他受保護資料夾第一次讀取時，macOS 可能要求 Files and Folders 權限。若 LaunchAgent 被拒絕，請到 System Settings → Privacy & Security 授權，再執行 `apofocusctl restart`。
+
+## PostgreSQL 自動備份與還原驗證
+
+啟用 `--backup-root` 後會建立兩個固定、不可注入任意命令或路徑的排程：
+
+- `com.apofocus.backup`：每天 03:00 執行；第一次 bootstrap 也會立即開始。先檢查外接 Volume UUID 與空間，再以 `pg_dump` custom format＋zstd level 6 寫入 `.partial`；`pg_restore --list` 通過後才原子改名為 `.dump`。
+- `com.apofocus.backup-verify`：每月 1 日 04:00 執行。把最新 `.dump` 完整還原到 `apofocus_verify_*` 暫存 database，確認 `photos`、`projects`、`tags` 存在後刪除暫存 database，永遠不會覆蓋 live `apofocus` database。
+
+每日排程若從未成功驗證過，或上次驗證已超過 30 日，也會在完成新備份後接著執行還原測試。兩種 operation 共用 process lock，不會同時操作；MCP 觸發是非同步的，不會讓 LLM request 等待大型 database dump 或 restore。
+
+還原測試會暫時在 PostgreSQL data volume 建立另一份 database，因此開始前要求內建碟至少保有「目前 DB 大小的 1.5 倍＋5GB」可用空間；不足時只記錄驗證失敗，不會冒險塞滿系統碟。若 process 被中止，下次驗證會先清除名稱符合 `apofocus_verify_*` 的殘留測試 database；超過 24 小時的 `.partial` 也會安全清理。
+
+保留政策只在新 archive 已完成且驗證格式後才執行：最近 7 日每天一份、接著 4 週每週一份、再接著 6 個月每月一份。備份失敗、磁碟離線或空間不足時不會刪除既有備份。狀態保存在 `~/Library/Application Support/ApoFocus/backup-status.json`，logs 位於 `~/Library/Logs/ApoFocus/backup*.log`。
+
+外接備份碟必須與運作中的內建 PostgreSQL SSD 分開。Time Machine 可以繼續備份 Mac，但不能取代 database-aware dump 與 restore test；若要防範外接備份碟本身故障，仍應定期把備份複製到第二顆輪替硬碟。
 
 ## 先看介面（不需要資料庫）
 
@@ -135,7 +163,7 @@ make run
 | `metadata jsonb` | 未提升為常用欄位的 EXIF、IPTC、XMP 等延伸資訊 |
 | `embedding vector(512)` | 經 L2 normalization 的 OpenCLIP 影像向量 |
 
-影片與音訊存放於 `media_assets`，可搜尋的時間片段存放於 `media_segments`：影片片段可同時有 `keyframe_path` 與 `visual_embedding vector(512)`；有音軌的影片及純音訊片段使用 `audio_embedding vector(512)`。逐字稿保留在 asset 與片段層，方便全文搜尋和播放器時間軸顯示。
+影片與音訊存放於 `media_assets`，可搜尋的時間片段存放於 `media_segments`：影片片段保存 `visual_embedding vector(512)`，新版匯入不永久保存 `keyframe_path`；這個 nullable 欄位只保留給舊資料或未來按需產生的 storyboard cache。有音軌的影片及純音訊片段使用 `audio_embedding vector(512)`。逐字稿保留在 asset 與片段層，方便全文搜尋和播放器時間軸顯示。
 
 ## 本機產生照片向量
 
@@ -161,16 +189,16 @@ curl -X POST http://127.0.0.1:8090/v1/embeddings \
 
 第一次使用 OpenCLIP 會下載模型權重。Apple Silicon 會優先使用 MPS，NVIDIA 環境使用 CUDA，其他環境則回退到 CPU。
 
-常見相機 RAW 格式會在 Pillow 無法解碼時改由 LibRaw／`rawpy` 產生預覽，包括 DNG、ARW、CR2、CR3、NEF 與 RAF。原始 RAW 檔只會被複製，不會重新編碼。
+常見相機 RAW 格式會在 Pillow 無法解碼時改由 LibRaw／`rawpy` 產生預覽，包括 DNG、ARW、CR2、CR3、NEF 與 RAF。原始 RAW 檔只會被複製，不會重新編碼。一般照片只解碼一次，並共用同一份已套用 EXIF orientation 的影像來產生 OpenCLIP 向量、1600px 最長邊 AVIF 縮圖與代表色；不會放大小圖。
 
 ## 本機影片與音訊辨識
 
 影片與音訊沿用同一個 `embedding-serve` process，且 batch worker 仍一次只處理一個檔案：
 
-- Video：FFmpeg 每 10 秒取一個 keyframe（上限 300），OpenCLIP 為每個 frame 產生 512 維視覺向量。
+- Video：FFmpeg 每 10 秒取一個暫存 keyframe（上限 300），OpenCLIP 為每個 frame 產生 512 維視覺向量。Keyframe 預設最長邊 960px、保留比例且不放大小影片；FFmpeg 通常會在一次 process 中取出同一支影片的所有樣本，只有不足取樣間隔的尾段缺 frame 時才補抓。向量與 Tags 寫入 DB 後，暫存 keyframes 立即刪除，不在 library 永久累積大量小檔案。
 - Video audio / Audio：FFmpeg 正規化為 mono 48 kHz WAV，Whisper `base` 產生逐字稿與 timestamp。
 - Audio segments：每 30 秒切一段（上限 600），CLAP 為每段產生 512 維聲音向量與聲音類型 Tags。
-- Audio thumbnail：產生靜態 waveform JPG；Video thumbnail：使用第一個 keyframe。
+- Photo 與 Video thumbnail 使用 AVIF。Video thumbnail 是單一 960×540 contact sheet，最多組合兩個代表 frame；不保存兩個獨立檔案。Audio 不產生 thumbnail，Web UI 直接以 CSS 音訊圖示呈現，因此每個 audio 少一次 waveform FFmpeg 處理及一個衍生檔。影片播放仍讀取原始檔，系統不會改變原影片的 container、codec、解析度或長寬比。
 
 需求是 Python 3.12、FFmpeg／ffprobe；模型會在第一次使用時下載，CLAP 權重較大，請預留約 3 GB 的模型快取空間。完成第一次下載後可用完全離線模式啟動：
 
@@ -180,7 +208,18 @@ make embedding-serve          # 第一次需連網下載模型
 make embedding-serve-offline  # 權重已快取後，不做網路檢查
 ```
 
-可調整 `WHISPER_MODEL`、`WHISPER_LANGUAGE`、`VIDEO_SAMPLE_SECONDS`、`MAX_VIDEO_SEGMENTS`、`AUDIO_SEGMENT_SECONDS` 與 `MAX_AUDIO_SEGMENTS`。長影片不會卡住 HTTP request：瀏覽器只建立 batch job，真正的 Python 分析在 background worker 執行，進度由 PostgreSQL 保存並透過 SSE 顯示。
+AVIF 預設使用 quality 42、speed 6 的容量優先設定；可用 `DERIVATIVE_IMAGE_QUALITY`（1–100）及 `DERIVATIVE_IMAGE_SPEED`（0–10，越高越快但通常檔案較大）調整。RAW 縮圖另外預設為最長邊 960px、quality 36，優先使用相機內嵌 preview；可用 `RAW_THUMBNAIL_MAX_EDGE` 與 `RAW_THUMBNAIL_QUALITY` 調整。若初次匯入速度比容量重要，可把 speed 提高到 8。另可調整 `PHOTO_THUMBNAIL_MAX_EDGE`、`WHISPER_MODEL`、`WHISPER_LANGUAGE`、`VIDEO_SAMPLE_SECONDS`、`VIDEO_KEYFRAME_MAX_EDGE`、`MAX_VIDEO_SEGMENTS`、`AUDIO_SEGMENT_SECONDS` 與 `MAX_AUDIO_SEGMENTS`。長影片不會卡住 HTTP request：瀏覽器只建立 batch job，真正的 Python 分析在 background worker 執行，進度由 PostgreSQL 保存並透過 SSE 顯示。
+
+照片／影音 inspect 與 import 回應會包含 `analysisTimingsMs`，Python 的 `/v1/analyze` 與 `/v1/analyze-media` 則回傳 `timingsMs`，可分辨 decode、縮圖、keyframe、模型 inference、標籤與轉錄耗時。請先用真實、混合相機來源的 100–1000 個檔案量測，再決定是否更換縮圖 backend：
+
+```bash
+make embedding-benchmark \
+  BENCHMARK_SOURCE="/Volumes/PHOTO_DISK/sample" \
+  BENCHMARK_OUTPUT="$HOME/Pictures/ApoFocus Library/benchmark" \
+  BENCHMARK_ARGS="--limit-per-type 100 --json /tmp/apofocus-benchmark.json"
+```
+
+`BENCHMARK_SOURCE` 必須位於 `PHOTO_ROOTS`，`BENCHMARK_OUTPUT` 必須位於 `THUMBNAIL_ROOTS`。報告列出每種媒體的 mean／p50／p95 與各階段耗時；至少量到 20 張照片，且真正可替換的 `thumbnailMs` 佔照片分析總時間 20% 以上，才建議用同一批樣本另行評估 libvips。Shared decode、OpenCLIP、Tags 與代表色時間不會被誤算成縮圖 backend 可改善的範圍。
 
 ## Finder 式資料夾
 
@@ -256,33 +295,34 @@ Batch API：
 
 ## 檔案搬移與 filesystem events
 
-設定 `DATABASE_URL` 與 `PHOTO_LIBRARY_ROOT` 後，Web app 與 MCP server 會把這個路徑登記在 `storage_roots`，啟動時確認 DB 已知的原檔、縮圖與 keyframe，接著遞迴監聽 library 內的 filesystem events。
+設定 `DATABASE_URL` 與 `PHOTO_LIBRARY_ROOT` 後，Web app 與 MCP server 會把這個路徑登記在 `storage_roots`，啟動時確認 DB 已知的原檔、縮圖與舊版可能保存的 keyframe，接著遞迴監聽 library 內的 filesystem events。
 
 - 檔案在同一個 filesystem 內改名或搬到 library 的其他資料夾時，device + inode 不變；watcher 會用 `file_id` 找到原資料並更新 `path`、`relative_path` 與瀏覽器 URL。
 - 刪除或移出 library 時，不刪 DB row，而是標成 `missing`；外接硬碟拔除時整個 root 標成 `volume_offline`。若 app 持續執行，重新掛載後會自動恢復監聽並核對已知路徑。
-- 新的匯入在寫入 DB 時就保存原檔、縮圖與 keyframe 的 file ID，不需要等下一次 scan。
+- 新的匯入在寫入 DB 時就保存原檔與 AVIF 縮圖的 file ID，不需要等下一次 scan；視覺取樣幀只在分析期間暫存，不會進入 managed library。
 - 啟動時只 `stat` 資料庫已知的路徑，不會掃整個 Volume 計算 SHA-256。只有 filesystem event 指向一個新搬入的資料夾時，才會走訪該子樹以接上其中已知 file ID。
 
 SHA-256 仍用於內容去重；它不能在沒有 index 或 filesystem event 的情況下告訴系統「檔案搬到哪裡」。如果程式關閉期間把檔案搬出 managed library、跨 filesystem 複製後刪除，inode 也會改變，系統只能先標成 `missing`。這種情況之後可再加一個由使用者指定範圍的 relink job，以 size/mtime 縮小候選後才計算 SHA-256，而不是無條件掃所有磁碟。
 
 ## MCP：讓 LLM 操作 ApoFocus
 
-MCP server 使用官方 Go SDK 與 stdio transport，共提供 25 個 tools：
+MCP server 使用官方 Go SDK 與 stdio transport；啟用備份後完整模式共提供 28 個 tools：
 
 | 類別 | Tools | 行為 |
 |---|---|---|
 | 照片匯入 | `get_photo_import_policy`、`inspect_photo`、`import_photo` | allowlist、EXIF／GeoTag 預覽、folder、OpenCLIP Tags／向量、縮圖及 transaction 寫入 |
 | 照片搜尋 | `search_photos`、`get_photo`、`find_similar_photos` | 年份、專題、Tags、相機、鏡頭、ISO、GeoTag、全文搜尋與 pgvector 相似搜尋 |
-| 影片／音訊 | `inspect_media`、`import_media`、`search_media`、`get_media`、`find_similar_media` | metadata、逐字稿、keyframes、OpenCLIP／CLAP vectors、Tags、搜尋與相似度 |
+| 影片／音訊 | `inspect_media`、`import_media`、`search_media`、`get_media`、`find_similar_media` | metadata、逐字稿、暫存視覺取樣幀、OpenCLIP／CLAP vectors、Tags、搜尋與相似度 |
 | 虛擬資料夾 | `browse_folders`、`create_collection`、`add_photos_to_collection`、`get_collection_photos` | facets、Finder 式 browsing、manual／smart collections；`browse_folders.locale` 支援 `zh-TW`、`en`、`de` |
 | Batch | `create_batch_job`、`list_batch_jobs`、`get_batch_job`、`wait_batch_job`、`list_batch_items`、`cancel_batch_job`、`resume_batch_job` | 建立與找回持久化工作、短輪詢監控、逐檔錯誤、取消與安全恢復；狀態 label 支援三種語言 |
 | 維運 | `get_system_health`、`diagnose_batch_job`、`repair_managed_service` | 檢查 DB、Web／Worker、模型服務、heartbeat、路徑與磁碟空間；診斷後只允許重啟固定 LaunchAgents |
+| 備份 | `get_backup_health`、`run_backup`、`verify_backup` | 檢查 Volume UUID、空間、最新備份、還原驗證與錯誤；只允許非同步觸發兩個固定 backup LaunchAgents |
 
 資料夾規則為：
 
 ```text
 <PHOTO_LIBRARY_ROOT>/originals/YYYY/<project>/YYYY-MM-DD_<filename>_<sha-prefix>.<ext>
-<PHOTO_LIBRARY_ROOT>/thumbnails/YYYY/<project>/YYYY-MM-DD_<filename>_<sha-prefix>.jpg
+<PHOTO_LIBRARY_ROOT>/thumbnails/YYYY/<project>/YYYY-MM-DD_<filename>_<sha-prefix>.avif
 ```
 
 MCP host 必須先將聊天中附加的照片、影片或音訊落到 `APOFOCUS_IMPORT_ROOTS` 其中一個本機目錄，再把該絕對路徑傳入 `source_path`。server 會解析 symlink 並重新檢查範圍，不接受任意 filesystem path。來源檔一律保留，匯入採 copy。
@@ -297,6 +337,9 @@ export PHOTO_ROOTS="$APOFOCUS_IMPORT_ROOTS"
 export THUMBNAIL_ROOTS="$PHOTO_LIBRARY_ROOT"
 export EMBEDDING_SERVICE_URL='http://127.0.0.1:8090'
 export APOFOCUS_APP_URL='http://127.0.0.1:8080'
+export APOFOCUS_BACKUP_ROOT='/Volumes/ApoFocusBackup/PostgreSQL'
+export APOFOCUS_BACKUP_STATUS="$HOME/Library/Application Support/ApoFocus/backup-status.json"
+export APOFOCUS_BACKUP_VOLUME_UUID='<diskutil reported UUID>'
 
 make embedding-serve   # terminal 1
 make run               # terminal 2，包含 Web API 與 Batch Worker
@@ -315,7 +358,10 @@ make build-mcp         # 產生 bin/apofocus-mcp，交由 LLM client 啟動
         "APOFOCUS_IMPORT_ROOTS": "/Users/me/Downloads/ApoFocus-Inbox",
         "PHOTO_LIBRARY_ROOT": "/Volumes/PhotoArchive/ApoFocus",
         "EMBEDDING_SERVICE_URL": "http://127.0.0.1:8090",
-        "APOFOCUS_APP_URL": "http://127.0.0.1:8080"
+        "APOFOCUS_APP_URL": "http://127.0.0.1:8080",
+        "APOFOCUS_BACKUP_ROOT": "/Volumes/ApoFocusBackup/PostgreSQL",
+        "APOFOCUS_BACKUP_STATUS": "/Users/me/Library/Application Support/ApoFocus/backup-status.json",
+        "APOFOCUS_BACKUP_VOLUME_UUID": "<volume UUID>"
       }
     }
   }
@@ -340,8 +386,9 @@ make build-mcp         # 產生 bin/apofocus-mcp，交由 LLM client 啟動
 2. 以 `list_batch_jobs` 找回近期工作，再對目標呼叫 `diagnose_batch_job`。診斷會區分正常長時間分析、stale heartbeat、服務停止、來源硬碟離線、library 空間不足和可重試的終止工作。
 3. 若診斷建議修復，才呼叫 `repair_managed_service` 並傳入 `confirmed: true`。`service` 只接受 `postgres`、`web` 或 `embedding`，底層只執行對應的 `com.apofocus.*` LaunchAgent restart，不接受 command、argument 或任意 shell input。
 4. 再次呼叫 `get_system_health`。服務恢復後，stale 的 active job 會由 Worker 自動接手；只有 `failed`、`cancelled` 或 `completed_with_errors` 才需要呼叫 `resume_batch_job`。
+5. 若使用者詢問備份，呼叫 `get_backup_health`。只有在 Volume UUID 與可用空間正常時才呼叫 `run_backup` 或 `verify_backup`，接著用 `get_backup_health` 追蹤 `runningOperation`、`lastBackupAt`、`lastVerifiedAt` 與 `lastError`。
 
-若 PostgreSQL 離線，MCP 會以降級維運模式啟動，只提供健康檢查與固定服務修復；若 managed library 離線，則保留 catalog、Batch 查詢與維運 tools，但不載入會寫入 library 的單檔匯入工具。修復 PostgreSQL 或重新掛載 library 後，重新連線 MCP client 即會載入完整 toolset。
+若 PostgreSQL 離線，MCP 會以降級維運模式啟動，保留健康檢查、固定服務修復，以及已設定的備份健康／觸發 tools；若 managed library 離線，則保留 catalog、Batch 查詢與維運 tools，但不載入會寫入 library 的單檔匯入工具。修復 PostgreSQL 或重新掛載 library 後，重新連線 MCP client 即會載入完整 toolset。
 
 ## API
 
@@ -362,5 +409,6 @@ make build-mcp         # 產生 bin/apofocus-mcp，交由 LLM client 啟動
 go test ./...
 go vet ./...
 node --check web/static/app.js
-python3 -m py_compile services/embedding/app.py services/embedding/worker.py
+python3 -m py_compile services/embedding/app.py services/embedding/worker.py services/embedding/benchmark.py
+PYTHONPATH=services/embedding python3 -m unittest services.embedding.test_benchmark
 ```

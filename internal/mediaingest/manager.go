@@ -91,7 +91,11 @@ func (m *Manager) Inspect(ctx context.Context, request ImportRequest) (Inspectio
 		return Inspection{}, err
 	}
 	defer os.RemoveAll(stagingDir)
-	analysis, err := m.analyzer.AnalyzeMedia(ctx, source, filepath.Join(stagingDir, "thumbnail.jpg"), filepath.Join(stagingDir, "segments"), request.AutoTags)
+	stagingThumbnail := ""
+	if mediaType == "video" {
+		stagingThumbnail = filepath.Join(stagingDir, "thumbnail.avif")
+	}
+	analysis, err := m.analyzer.AnalyzeMedia(ctx, source, stagingThumbnail, filepath.Join(stagingDir, "segments"), request.AutoTags)
 	if err != nil {
 		return Inspection{}, err
 	}
@@ -135,6 +139,7 @@ func (m *Manager) Inspect(ctx context.Context, request ImportRequest) (Inspectio
 		SampleRate: analysis.SampleRate, Channels: analysis.Channels, SuggestedTags: tags,
 		TranscriptPreview: string(preview), SegmentCount: len(analysis.Segments),
 		VisualVectorCount: visualVectors, AudioVectorCount: audioVectors, Metadata: analysis.Metadata,
+		AnalysisTimings: analysis.TimingsMS,
 	}, nil
 }
 
@@ -165,7 +170,10 @@ func (m *Manager) Import(ctx context.Context, request ImportRequest) (ImportResu
 		return ImportResult{}, err
 	}
 	defer os.RemoveAll(stagingDir)
-	stagingThumbnail := filepath.Join(stagingDir, "thumbnail.jpg")
+	stagingThumbnail := ""
+	if mediaType == "video" {
+		stagingThumbnail = filepath.Join(stagingDir, "thumbnail.avif")
+	}
 	stagingSegments := filepath.Join(stagingDir, "segments")
 	analysis, err := m.analyzer.AnalyzeMedia(ctx, source, stagingThumbnail, stagingSegments, request.AutoTags)
 	if err != nil {
@@ -190,7 +198,9 @@ func (m *Manager) Import(ctx context.Context, request ImportRequest) (ImportResu
 	// A process can stop after analyzed artifacts were moved but before the DB
 	// transaction. These paths contain the content hash, so replacing leftovers
 	// is safe when FindByHash above confirmed that no completed asset exists.
-	_ = os.Remove(thumbnailPath)
+	if thumbnailPath != "" {
+		_ = os.Remove(thumbnailPath)
+	}
 	_ = os.RemoveAll(segmentDir)
 	if err := moveAnalyzedFiles(stagingThumbnail, stagingSegments, thumbnailPath, segmentDir, analysis.Segments); err != nil {
 		return ImportResult{}, err
@@ -198,14 +208,18 @@ func (m *Manager) Import(ctx context.Context, request ImportRequest) (ImportResu
 	createdOriginal, err := copyFile(source, originalPath)
 	if err != nil {
 		_ = os.RemoveAll(segmentDir)
-		_ = os.Remove(thumbnailPath)
+		if thumbnailPath != "" {
+			_ = os.Remove(thumbnailPath)
+		}
 		return ImportResult{}, err
 	}
 	cleanup := func() {
 		if createdOriginal {
 			_ = os.Remove(originalPath)
 		}
-		_ = os.Remove(thumbnailPath)
+		if thumbnailPath != "" {
+			_ = os.Remove(thumbnailPath)
+		}
 		_ = os.RemoveAll(segmentDir)
 	}
 	for index := range analysis.Segments {
@@ -225,18 +239,22 @@ func (m *Manager) Import(ctx context.Context, request ImportRequest) (ImportResu
 		cleanup()
 		return ImportResult{}, fmt.Errorf("identify managed media: %w", err)
 	}
-	thumbnailIdentity, err := fileidentity.FromPath(thumbnailPath)
-	if err != nil {
-		cleanup()
-		return ImportResult{}, fmt.Errorf("identify managed media thumbnail: %w", err)
+	thumbnailFileID := ""
+	if thumbnailPath != "" {
+		thumbnailIdentity, identityErr := fileidentity.FromPath(thumbnailPath)
+		if identityErr != nil {
+			cleanup()
+			return ImportResult{}, fmt.Errorf("identify managed media thumbnail: %w", identityErr)
+		}
+		thumbnailFileID = thumbnailIdentity.FileID
 	}
 	record := Record{
 		MediaType: mediaType, Title: title, Year: recordedAt.Year(), Project: project, RecordedAt: recordedAt,
 		DurationMS: analysis.DurationMS, MimeType: analysis.MimeType, Codec: analysis.Codec, Dimensions: analysis.Dimensions,
 		SampleRate: analysis.SampleRate, Channels: analysis.Channels, Path: originalPath, ThumbnailPath: thumbnailPath,
 		RelativePath: managedRelativePath(m.libraryRoot, originalPath), ThumbnailRelativePath: managedRelativePath(m.libraryRoot, thumbnailPath),
-		FileID: originalIdentity.FileID, ThumbnailFileID: thumbnailIdentity.FileID,
-		ContentSHA256: hash, MediaURL: mediaURL(m.libraryRoot, originalPath), ThumbnailURL: mediaURL(m.libraryRoot, thumbnailPath),
+		FileID: originalIdentity.FileID, ThumbnailFileID: thumbnailFileID,
+		ContentSHA256: hash, MediaURL: mediaURL(m.libraryRoot, originalPath), ThumbnailURL: optionalMediaURL(m.libraryRoot, thumbnailPath),
 		Transcript: analysis.Transcript, Tags: mergeTags(request.Tags, analysis.Tags), Metadata: analysis.Metadata, Segments: analysis.Segments,
 	}
 	assetID, err := m.repository.Insert(ctx, record)
@@ -244,7 +262,7 @@ func (m *Manager) Import(ctx context.Context, request ImportRequest) (ImportResu
 		cleanup()
 		return ImportResult{}, err
 	}
-	return ImportResult{AssetID: assetID, MediaType: mediaType, Path: originalPath, ThumbnailPath: thumbnailPath, Tags: record.Tags, SegmentCount: len(record.Segments), TranscriptLength: len([]rune(record.Transcript))}, nil
+	return ImportResult{AssetID: assetID, MediaType: mediaType, Path: originalPath, ThumbnailPath: thumbnailPath, Tags: record.Tags, SegmentCount: len(record.Segments), TranscriptLength: len([]rune(record.Transcript)), AnalysisTimings: analysis.TimingsMS}, nil
 }
 
 func managedRelativePath(root, path string) string {
@@ -294,9 +312,12 @@ func (m *Manager) destinationPaths(mediaType, project, title, hash, extension st
 	base := safeSegment(title)
 	filename := fmt.Sprintf("%s_%s_%s%s", recordedAt.Format("2006-01-02"), base, hash[:10], strings.ToLower(extension))
 	stem := strings.TrimSuffix(filename, filepath.Ext(filename))
+	thumbnailPath := ""
+	if mediaType == "video" {
+		thumbnailPath = filepath.Join(m.libraryRoot, "thumbnails", kind, year, safeSegment(project), stem+".avif")
+	}
 	return filepath.Join(m.libraryRoot, "originals", kind, year, safeSegment(project), filename),
-		filepath.Join(m.libraryRoot, "thumbnails", kind, year, safeSegment(project), stem+".jpg"),
-		filepath.Join(m.libraryRoot, "segments", kind, year, safeSegment(project), stem)
+		thumbnailPath, filepath.Join(m.libraryRoot, "segments", kind, year, safeSegment(project), stem)
 }
 
 func moveAnalyzedFiles(stagingThumbnail, stagingSegments, thumbnailPath, segmentDir string, segments []Segment) error {
@@ -310,13 +331,15 @@ func moveAnalyzedFiles(stagingThumbnail, stagingSegments, thumbnailPath, segment
 			_ = os.Remove(thumbnailPath)
 		}
 	}
-	if err := os.MkdirAll(filepath.Dir(thumbnailPath), 0o750); err != nil {
-		return err
+	if thumbnailPath != "" {
+		if err := os.MkdirAll(filepath.Dir(thumbnailPath), 0o750); err != nil {
+			return err
+		}
+		if err := os.Rename(stagingThumbnail, thumbnailPath); err != nil {
+			return fmt.Errorf("move thumbnail: %w", err)
+		}
+		thumbnailMoved = true
 	}
-	if err := os.Rename(stagingThumbnail, thumbnailPath); err != nil {
-		return fmt.Errorf("move thumbnail: %w", err)
-	}
-	thumbnailMoved = true
 	if _, err := os.Stat(stagingSegments); err == nil {
 		if err := os.MkdirAll(filepath.Dir(segmentDir), 0o750); err != nil {
 			cleanup()
@@ -469,4 +492,11 @@ func mediaURL(root, path string) string {
 		parts[index] = url.PathEscape(parts[index])
 	}
 	return "/media/" + strings.Join(parts, "/")
+}
+
+func optionalMediaURL(root, path string) string {
+	if path == "" {
+		return ""
+	}
+	return mediaURL(root, path)
 }

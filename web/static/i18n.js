@@ -67,7 +67,7 @@
       "batch.auto.videos": "使用 OpenCLIP 與 CLAP 自動加 Tags", "batch.auto.audios": "使用 CLAP 自動加 Tags", "batch.create": "建立批次工作",
       "batch.creating": "正在建立工作…", "batch.createError": "無法建立批次工作", "batch.discovered": "已發現", "batch.success": "成功", "batch.failed": "失敗",
       "batch.cancel": "要求停止工作", "batch.cancelling": "正在停止…", "batch.queue": "工作已存入 PostgreSQL queue",
-      "batch.status.pending": "等待處理", "batch.status.scanning": "掃描媒體檔案", "batch.status.running": "建立縮圖、片段、逐字稿與向量",
+      "batch.status.pending": "等待處理", "batch.status.scanning": "掃描媒體檔案", "batch.status.running": "處理媒體、片段、逐字稿與向量",
       "batch.status.completed": "處理完成", "batch.status.completed_with_errors": "完成，部分檔案失敗", "batch.status.failed": "工作失敗", "batch.status.cancelled": "已停止"
     },
     en: {
@@ -117,7 +117,7 @@
       "batch.recursive": "Include all subfolders", "batch.auto.photos": "Add tags automatically with OpenCLIP", "batch.auto.videos": "Add tags automatically with OpenCLIP and CLAP",
       "batch.auto.audios": "Add tags automatically with CLAP", "batch.create": "Create batch job", "batch.creating": "Creating job…", "batch.createError": "Could not create batch job",
       "batch.discovered": "Discovered", "batch.success": "Succeeded", "batch.failed": "Failed", "batch.cancel": "Stop job", "batch.cancelling": "Stopping…", "batch.queue": "Job saved to the PostgreSQL queue",
-      "batch.status.pending": "Waiting", "batch.status.scanning": "Scanning media files", "batch.status.running": "Creating thumbnails, segments, transcripts, and vectors",
+      "batch.status.pending": "Waiting", "batch.status.scanning": "Scanning media files", "batch.status.running": "Processing media, segments, transcripts, and vectors",
       "batch.status.completed": "Completed", "batch.status.completed_with_errors": "Completed with some failures", "batch.status.failed": "Job failed", "batch.status.cancelled": "Stopped"
     },
     de: {
@@ -167,7 +167,7 @@
       "batch.recursive": "Alle Unterordner einbeziehen", "batch.auto.photos": "Tags automatisch mit OpenCLIP hinzufügen", "batch.auto.videos": "Tags automatisch mit OpenCLIP und CLAP hinzufügen",
       "batch.auto.audios": "Tags automatisch mit CLAP hinzufügen", "batch.create": "Stapelauftrag erstellen", "batch.creating": "Auftrag wird erstellt…", "batch.createError": "Stapelauftrag konnte nicht erstellt werden",
       "batch.discovered": "Gefunden", "batch.success": "Erfolgreich", "batch.failed": "Fehlgeschlagen", "batch.cancel": "Auftrag stoppen", "batch.cancelling": "Wird gestoppt…", "batch.queue": "Auftrag wurde in der PostgreSQL-Warteschlange gespeichert",
-      "batch.status.pending": "Wartet", "batch.status.scanning": "Mediendateien werden gescannt", "batch.status.running": "Thumbnails, Segmente, Transkripte und Vektoren werden erstellt",
+      "batch.status.pending": "Wartet", "batch.status.scanning": "Mediendateien werden gescannt", "batch.status.running": "Medien, Segmente, Transkripte und Vektoren werden verarbeitet",
       "batch.status.completed": "Abgeschlossen", "batch.status.completed_with_errors": "Mit einigen Fehlern abgeschlossen", "batch.status.failed": "Auftrag fehlgeschlagen", "batch.status.cancelled": "Gestoppt"
     }
   };

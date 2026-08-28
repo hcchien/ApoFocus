@@ -7,6 +7,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/hcchien/apofocus/internal/backup"
 	"github.com/hcchien/apofocus/internal/batch"
 	"github.com/hcchien/apofocus/internal/catalog"
 	"github.com/hcchien/apofocus/internal/folders"
@@ -66,6 +67,16 @@ type fakeMaintenance struct{ report maintenance.HealthReport }
 func (f fakeMaintenance) Check(context.Context) (maintenance.HealthReport, error) {
 	return f.report, nil
 }
+
+type fakeBackup struct{ report backup.HealthReport }
+
+func (f fakeBackup) Health(context.Context) (backup.HealthReport, error) { return f.report, nil }
+func (fakeBackup) TriggerBackup(context.Context) (backup.TriggerResult, error) {
+	return backup.TriggerResult{Accepted: true, Service: "com.apofocus.backup", Action: "kickstart"}, nil
+}
+func (fakeBackup) TriggerVerify(context.Context) (backup.TriggerResult, error) {
+	return backup.TriggerResult{Accepted: true, Service: "com.apofocus.backup-verify", Action: "kickstart"}, nil
+}
 func (f fakeMaintenance) Repair(_ context.Context, service string) (maintenance.RepairResult, error) {
 	return maintenance.RepairResult{Service: service, Label: "com.apofocus." + service, Action: "restart", Succeeded: true}, nil
 }
@@ -82,7 +93,9 @@ func TestFullServerAdvertisesCompleteToolset(t *testing.T) {
 	health := maintenance.HealthReport{Status: maintenance.StatusHealthy, Database: maintenance.ComponentHealth{Status: maintenance.StatusHealthy}, Web: maintenance.ComponentHealth{Status: maintenance.StatusHealthy}, Embedding: maintenance.ComponentHealth{Status: maintenance.StatusHealthy}, Worker: maintenance.WorkerHealth{Status: maintenance.StatusHealthy}}
 	server := NewWithOptions(Options{
 		PhotoImporter: manager, MediaImporter: fakeMediaImporter{}, Photos: catalog.NewMemoryStore(), Media: fakeMediaStore{},
-		Folders: fakeFolders{}, BatchJobs: jobs, Maintenance: fakeMaintenance{report: health}, ImportRoots: []string{inbox}, LibraryRoot: library,
+		Folders: fakeFolders{}, BatchJobs: jobs, Maintenance: fakeMaintenance{report: health},
+		Backup:      fakeBackup{report: backup.HealthReport{Status: backup.StatusHealthy, Configured: true, RootAvailable: true}},
+		ImportRoots: []string{inbox}, LibraryRoot: library,
 	})
 	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v1"}, nil)
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
@@ -101,7 +114,7 @@ func TestFullServerAdvertisesCompleteToolset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wanted := []string{"get_photo_import_policy", "inspect_photo", "import_photo", "search_photos", "get_photo", "find_similar_photos", "search_media", "get_media", "find_similar_media", "inspect_media", "import_media", "browse_folders", "create_collection", "add_photos_to_collection", "get_collection_photos", "create_batch_job", "get_batch_job", "list_batch_jobs", "wait_batch_job", "list_batch_items", "cancel_batch_job", "resume_batch_job", "get_system_health", "diagnose_batch_job", "repair_managed_service"}
+	wanted := []string{"get_photo_import_policy", "inspect_photo", "import_photo", "search_photos", "get_photo", "find_similar_photos", "search_media", "get_media", "find_similar_media", "inspect_media", "import_media", "browse_folders", "create_collection", "add_photos_to_collection", "get_collection_photos", "create_batch_job", "get_batch_job", "list_batch_jobs", "wait_batch_job", "list_batch_items", "cancel_batch_job", "resume_batch_job", "get_system_health", "diagnose_batch_job", "repair_managed_service", "get_backup_health", "run_backup", "verify_backup"}
 	seen := map[string]bool{}
 	for _, tool := range tools.Tools {
 		seen[tool.Name] = true
@@ -128,6 +141,16 @@ func TestFullServerAdvertisesCompleteToolset(t *testing.T) {
 	result, err = clientSession.CallTool(ctx, &mcp.CallToolParams{Name: "diagnose_batch_job", Arguments: map[string]any{"job_id": "job", "locale": "zh-TW"}})
 	if err != nil || result.IsError {
 		t.Fatalf("diagnose_batch_job failed: err=%v result=%+v", err, result)
+	}
+	result, err = clientSession.CallTool(ctx, &mcp.CallToolParams{Name: "get_backup_health", Arguments: map[string]any{"locale": "de"}})
+	if err != nil || result.IsError {
+		t.Fatalf("get_backup_health failed: err=%v result=%+v", err, result)
+	}
+	for _, name := range []string{"run_backup", "verify_backup"} {
+		result, err = clientSession.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: map[string]any{"locale": "en"}})
+		if err != nil || result.IsError {
+			t.Fatalf("%s failed: err=%v result=%+v", name, err, result)
+		}
 	}
 }
 
@@ -164,5 +187,38 @@ func TestMaintenanceModeAdvertisesOnlyHealthAndRepair(t *testing.T) {
 	}
 	if len(tools.Tools) != 2 || tools.Tools[0].Name != "get_system_health" || tools.Tools[1].Name != "repair_managed_service" {
 		t.Fatalf("unexpected maintenance toolset: %+v", tools.Tools)
+	}
+}
+
+func TestMaintenanceModeKeepsConfiguredBackupTools(t *testing.T) {
+	ctx := context.Background()
+	server := NewWithOptions(Options{
+		Maintenance: fakeMaintenance{report: maintenance.HealthReport{Status: maintenance.StatusUnhealthy}},
+		Backup:      fakeBackup{report: backup.HealthReport{Status: backup.StatusHealthy, Configured: true, RootAvailable: true}},
+	})
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v1"}, nil)
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	serverSession, err := server.Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer serverSession.Close()
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clientSession.Close()
+	tools, err := clientSession.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wanted := map[string]bool{"get_system_health": true, "repair_managed_service": true, "get_backup_health": true, "run_backup": true, "verify_backup": true}
+	if len(tools.Tools) != len(wanted) {
+		t.Fatalf("expected %d maintenance and backup tools, got %d", len(wanted), len(tools.Tools))
+	}
+	for _, tool := range tools.Tools {
+		if !wanted[tool.Name] {
+			t.Errorf("unexpected maintenance-mode tool %s", tool.Name)
+		}
 	}
 }

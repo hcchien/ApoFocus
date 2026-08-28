@@ -39,7 +39,7 @@ func addMediaImportTools(server *mcp.Server, importer MediaImporter) {
 	})
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "import_media", Title: "Import video or audio",
-		Description: "After inspect_media is reviewed, copy a video or audio file into the managed library, generate its thumbnail, transcript, keyframes and OpenCLIP/CLAP vectors, merge tags, and atomically insert the asset and segments in PostgreSQL. confirmed must be true; SHA-256 deduplication makes retries safe.",
+		Description: "After inspect_media is reviewed, copy a video or audio file into the managed library, generate a compact video thumbnail when applicable, transcript, temporary visual samples and OpenCLIP/CLAP vectors, merge tags, and atomically insert the asset and segments in PostgreSQL. Audio files do not create thumbnail artifacts. confirmed must be true; SHA-256 deduplication makes retries safe.",
 		Annotations: &mcp.ToolAnnotations{Title: "Import video or audio", ReadOnlyHint: false, IdempotentHint: true, DestructiveHint: &additive, OpenWorldHint: &closedWorld},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, input ImportMediaInput) (*mcp.CallToolResult, mediaingest.ImportResult, error) {
 		if !input.Confirmed {

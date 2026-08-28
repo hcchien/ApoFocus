@@ -1,4 +1,4 @@
-.PHONY: run test build-mcp build-batch run-mcp migrate-up migrate-down embedding-install embedding-serve embedding-serve-offline embedding-index install-macos
+.PHONY: run test build-mcp build-batch build-backup run-mcp migrate-up migrate-down embedding-install embedding-serve embedding-serve-offline embedding-index embedding-benchmark install-macos
 
 install-macos:
 	bash scripts/install_macos.sh
@@ -16,6 +16,10 @@ build-mcp:
 build-batch:
 	mkdir -p bin
 	go build -o bin/apofocus-batch ./cmd/apofocus-batch
+
+build-backup:
+	mkdir -p bin
+	go build -o bin/apofocus-backup ./cmd/apofocus-backup
 
 run-mcp:
 	go run ./cmd/apofocus-mcp
@@ -38,3 +42,8 @@ embedding-serve-offline:
 
 embedding-index:
 	.venv/bin/python services/embedding/worker.py
+
+embedding-benchmark:
+	@test -n "$(BENCHMARK_SOURCE)" || (echo "BENCHMARK_SOURCE is required" && exit 2)
+	@test -n "$(BENCHMARK_OUTPUT)" || (echo "BENCHMARK_OUTPUT is required and must be inside THUMBNAIL_ROOTS" && exit 2)
+	.venv/bin/python services/embedding/benchmark.py --source "$(BENCHMARK_SOURCE)" --output-dir "$(BENCHMARK_OUTPUT)" $(BENCHMARK_ARGS)

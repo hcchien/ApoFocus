@@ -284,6 +284,13 @@ function renderPhotoEmptyState() {
   $("#empty-clear").hidden = !filtered;
 }
 
+function mediaPreview(asset, mediaType) {
+  if (mediaType === "audios") {
+    return `<span class="audio-artwork" aria-hidden="true"><strong>♪</strong><small>${escapeHTML(asset.codec || "AUDIO")}</small></span>`;
+  }
+  return `<img src="${escapeAttr(asset.thumbnailUrl)}" alt="" loading="lazy" decoding="async">`;
+}
+
 function renderMediaAssets() {
   const mediaType = state.mediaType;
   $("#result-summary").textContent = mediaText(mediaType, "results", { count: formatNumber(state.total) });
@@ -296,7 +303,7 @@ function renderMediaAssets() {
   grid.hidden = state.mediaItems.length === 0;
   grid.innerHTML = state.mediaItems.map((asset) => `
     <button class="photo-card media-card ${asset.availabilityStatus && asset.availabilityStatus !== "available" && asset.availabilityStatus !== "unknown" ? "unavailable" : ""}" data-media-id="${escapeAttr(asset.id)}" aria-label="${escapeAttr(mediaText(mediaType, "view", { title: asset.title }))}">
-      <img src="${escapeAttr(asset.thumbnailUrl)}" alt="" loading="lazy" decoding="async">
+      ${mediaPreview(asset, mediaType)}
       <span class="media-kind">${mediaType === "videos" ? "▶" : "♪"}</span>
       <span class="card-badge">${escapeHTML(availabilityLabel(asset.availabilityStatus) || formatDuration(asset.durationMs))}</span>
       <span class="card-copy"><h3>${escapeHTML(asset.title)}</h3><p>${escapeHTML(asset.project)} · ${asset.year} · ${escapeHTML(asset.codec)}</p></span>
@@ -483,11 +490,13 @@ function renderMediaDetail(asset, mediaType, { loadPlayer = false } = {}) {
   $("#media-detail-project").textContent = asset.project;
   $("#media-detail-title").textContent = asset.title;
   $("#media-detail-date").textContent = formatDate(asset.recordedAt);
-  $("#media-detail-info").innerHTML = dlItems([
+  const mediaInfo = [
     [t("field.duration"), formatDuration(asset.durationMs)], ["Codec", asset.codec], [t("field.format"), asset.mimeType],
     [t("field.dimensions"), asset.dimensions], [t("field.sampleRate"), asset.sampleRate ? `${formatNumber(asset.sampleRate)} Hz` : "—"], [t("field.channels"), asset.channels],
-    [t("field.originalStatus"), availabilityLabel(asset.availabilityStatus, true)], [t("field.previewStatus"), availabilityLabel(asset.thumbnailStatus, true)],
-  ]);
+    [t("field.originalStatus"), availabilityLabel(asset.availabilityStatus, true)],
+  ];
+  if (mediaType === "videos") mediaInfo.push([t("field.previewStatus"), availabilityLabel(asset.thumbnailStatus, true)]);
+  $("#media-detail-info").innerHTML = dlItems(mediaInfo);
   $("#media-detail-tags").innerHTML = (asset.tags || []).map((tag) => `<span># ${escapeHTML(tag)}</span>`).join("");
   $("#media-detail-transcript").textContent = asset.transcript || t("media.noTranscript");
   const visualCount = (asset.segments || []).filter((segment) => segment.segmentType === "visual").length;
@@ -502,7 +511,6 @@ function renderMediaDetail(asset, mediaType, { loadPlayer = false } = {}) {
   } else {
     video.hidden = true;
     audioWrap.hidden = false;
-    $("#detail-audio-image").src = asset.thumbnailUrl;
     if (loadPlayer) { $("#detail-audio").src = asset.mediaUrl; $("#detail-audio").load(); }
   }
   $("#media-similar-visual").hidden = mediaType !== "videos";
@@ -552,7 +560,7 @@ function renderSimilarResults() {
   $("#similar-description").textContent = t("similar.description", { title: similar.source.title, model: similar.modality === "visual" ? "OpenCLIP" : "CLAP" });
   $("#similar-grid").innerHTML = similar.items.length ? similar.items.map(({ asset: match, similarity }) => `
     <button class="similar-card" data-similar-media-id="${escapeAttr(match.id)}">
-      <img src="${escapeAttr(match.thumbnailUrl)}" alt="" loading="lazy">
+      ${mediaPreview(match, similar.mediaType)}
       <span class="similar-copy"><strong>${escapeHTML(match.title)}</strong><span>${escapeHTML(t("similar.score", { score: formatNumber(Math.round(similarity * 100)) }))}</span></span>
     </button>`).join("") : `<div class="empty-state"><h2>${escapeHTML(t("similar.noComparable", { media: mediaText(similar.mediaType, "label") }))}</h2><p>${escapeHTML(t("similar.noComparableCopy"))}</p></div>`;
   $$('[data-similar-media-id]', $("#similar-grid")).forEach((card) => card.addEventListener("click", () => {

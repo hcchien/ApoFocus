@@ -115,6 +115,9 @@ func TestImportCopiesAnalyzesAndCreatesRecord(t *testing.T) {
 	if _, err := os.Stat(result.ThumbnailPath); err != nil {
 		t.Fatalf("thumbnail missing: %v", err)
 	}
+	if filepath.Ext(result.ThumbnailPath) != ".avif" {
+		t.Fatalf("thumbnail should use AVIF: %s", result.ThumbnailPath)
+	}
 	if repository.record.ImageURL == "" || repository.record.ThumbnailURL == "" {
 		t.Fatal("media URLs were not assigned")
 	}

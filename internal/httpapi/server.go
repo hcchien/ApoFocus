@@ -107,6 +107,9 @@ func (s *Server) serveMedia(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "media not found")
 		return
 	}
+	if strings.EqualFold(filepath.Ext(target), ".avif") {
+		w.Header().Set("Content-Type", "image/avif")
+	}
 	w.Header().Set("Cache-Control", "private, max-age=86400")
 	http.ServeFile(w, r, target)
 }

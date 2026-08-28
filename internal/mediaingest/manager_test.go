@@ -13,10 +13,22 @@ type fakeAnalyzer struct{ calls int }
 
 func (a *fakeAnalyzer) AnalyzeMedia(_ context.Context, source, thumbnail, segmentDir string, _ bool) (Analysis, error) {
 	a.calls++
-	if err := os.MkdirAll(segmentDir, 0o750); err != nil {
-		return Analysis{}, err
+	mediaType := DetectMediaType(source)
+	if thumbnail != "" {
+		if err := os.WriteFile(thumbnail, []byte("thumbnail"), 0o640); err != nil {
+			return Analysis{}, err
+		}
 	}
-	if err := os.WriteFile(thumbnail, []byte("thumbnail"), 0o640); err != nil {
+	if mediaType == "audio" {
+		audio := make([]float32, 512)
+		audio[0] = 1
+		return Analysis{
+			MediaType: "audio", DurationMS: 6100, MimeType: "audio/wav", Codec: "pcm_s16le",
+			RecordedAt: "2026-08-26T12:00:00Z", Tags: []string{"訪談"},
+			Segments: []Segment{{SegmentType: "audio", Index: 0, EndMS: 6100, Tags: []string{"訪談"}, AudioVector: audio}},
+		}, nil
+	}
+	if err := os.MkdirAll(segmentDir, 0o750); err != nil {
 		return Analysis{}, err
 	}
 	frame := filepath.Join(segmentDir, "frame-000000.jpg")
@@ -83,6 +95,9 @@ func TestManagerImportsVideoAndDeduplicates(t *testing.T) {
 	if !strings.Contains(repository.record.Path, filepath.Join("originals", "videos", "2026", "島嶼-日常")) {
 		t.Fatalf("unexpected managed path: %s", repository.record.Path)
 	}
+	if filepath.Ext(repository.record.ThumbnailPath) != ".avif" {
+		t.Fatalf("thumbnail should use AVIF: %s", repository.record.ThumbnailPath)
+	}
 	if strings.Join(repository.record.Tags, ",") != "共同,客戶,紀實" {
 		t.Fatalf("unexpected merged tags: %v", repository.record.Tags)
 	}
@@ -130,6 +145,34 @@ func TestManagerInspectsVideoWithoutPersistingArtifacts(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatalf("inspection left staging artifacts: %v", entries)
+	}
+}
+
+func TestManagerImportsAudioWithoutThumbnail(t *testing.T) {
+	root := t.TempDir()
+	inbox := filepath.Join(root, "inbox")
+	library := filepath.Join(root, "library")
+	if err := os.MkdirAll(inbox, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(inbox, "interview.wav")
+	if err := os.WriteFile(source, []byte("audio bytes"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	repository := &fakeRepository{}
+	manager, err := NewManager(library, []string{inbox}, &fakeAnalyzer{}, repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := manager.Import(context.Background(), ImportRequest{SourcePath: source, AutoTags: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.MediaType != "audio" || result.ThumbnailPath != "" || repository.record.ThumbnailURL != "" || repository.record.ThumbnailFileID != "" {
+		t.Fatalf("audio should not have a thumbnail artifact: result=%+v record=%+v", result, repository.record)
+	}
+	if _, err := os.Stat(filepath.Join(library, "thumbnails", "audios")); !os.IsNotExist(err) {
+		t.Fatalf("audio import should not create a thumbnail directory: %v", err)
 	}
 }
 

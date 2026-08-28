@@ -16,6 +16,7 @@ STATE_DIR="${APOFOCUS_STATE_DIR:-$HOME/Library/Application Support/ApoFocus}"
 LIBRARY_ROOT="${APOFOCUS_LIBRARY_ROOT:-$HOME/Pictures/ApoFocus Library}"
 INBOX_ROOT="${APOFOCUS_INBOX_ROOT:-$HOME/Pictures/ApoFocus Inbox}"
 IMPORT_ROOTS="${APOFOCUS_IMPORT_ROOTS:-}"
+BACKUP_ROOT="${APOFOCUS_BACKUP_ROOT:-}"
 POSTGRES_PORT="${APOFOCUS_POSTGRES_PORT:-55432}"
 ADDR="${APOFOCUS_ADDR:-127.0.0.1:8080}"
 
@@ -29,6 +30,7 @@ Options:
   --inbox-root PATH        MCP and batch import inbox.
   --import-roots PATHS     Colon-separated import allowlist.
   --state-dir PATH         App binaries, PostgreSQL, venv, and model cache.
+  --backup-root PATH       External APFS volume directory for PostgreSQL backups.
   --postgres-port PORT     Dedicated local PostgreSQL port (default: 55432).
   --addr HOST:PORT         Local Web listen address (default: 127.0.0.1:8080).
   --skip-model-download    Install Python packages but download weights later.
@@ -38,7 +40,7 @@ Options:
 
 The same values can be supplied with APOFOCUS_LIBRARY_ROOT,
 APOFOCUS_INBOX_ROOT, APOFOCUS_IMPORT_ROOTS, APOFOCUS_STATE_DIR,
-APOFOCUS_POSTGRES_PORT, and APOFOCUS_ADDR.
+APOFOCUS_BACKUP_ROOT, APOFOCUS_POSTGRES_PORT, and APOFOCUS_ADDR.
 EOF
 }
 
@@ -110,6 +112,7 @@ while [[ $# -gt 0 ]]; do
     --inbox-root) [[ $# -ge 2 ]] || fail "$1 requires a path"; INBOX_ROOT="$2"; shift 2 ;;
     --import-roots) [[ $# -ge 2 ]] || fail "$1 requires a value"; IMPORT_ROOTS="$2"; shift 2 ;;
     --state-dir) [[ $# -ge 2 ]] || fail "$1 requires a path"; STATE_DIR="$2"; shift 2 ;;
+    --backup-root) [[ $# -ge 2 ]] || fail "$1 requires a path"; BACKUP_ROOT="$2"; shift 2 ;;
     --postgres-port) [[ $# -ge 2 ]] || fail "$1 requires a port"; POSTGRES_PORT="$2"; shift 2 ;;
     --addr) [[ $# -ge 2 ]] || fail "$1 requires HOST:PORT"; ADDR="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -120,6 +123,9 @@ done
 STATE_DIR="$(expand_path "$STATE_DIR")"
 LIBRARY_ROOT="$(expand_path "$LIBRARY_ROOT")"
 INBOX_ROOT="$(expand_path "$INBOX_ROOT")"
+if [[ -n "$BACKUP_ROOT" ]]; then
+  BACKUP_ROOT="$(expand_path "$BACKUP_ROOT")"
+fi
 if [[ -z "$IMPORT_ROOTS" ]]; then
   IMPORT_ROOTS="$INBOX_ROOT:/Volumes"
 fi
@@ -139,6 +145,10 @@ ADDR="127.0.0.1:$WEB_PORT"
 [[ "$LIBRARY_ROOT" != *:* ]] || fail "library path cannot contain ':'"
 [[ "$INBOX_ROOT" != *:* ]] || fail "inbox path cannot contain ':'"
 [[ "$STATE_DIR" != *:* ]] || fail "state path cannot contain ':'"
+[[ "$BACKUP_ROOT" != *:* ]] || fail "backup path cannot contain ':'"
+if [[ -n "$BACKUP_ROOT" && "$BACKUP_ROOT" != /Volumes/* ]]; then
+  fail "--backup-root must be on a mounted external volume under /Volumes"
+fi
 
 APP_URL="http://$ADDR"
 BIN_DIR="$STATE_DIR/bin"
@@ -150,6 +160,8 @@ LOG_DIR="$HOME/Library/Logs/ApoFocus"
 LAUNCH_AGENT_DIR="$HOME/Library/LaunchAgents"
 CONFIG_FILE="$STATE_DIR/apofocus.env"
 PASSWORD_FILE="$STATE_DIR/postgres.password"
+BACKUP_STATUS="$STATE_DIR/backup-status.json"
+BACKUP_VOLUME_UUID=""
 DOMAIN="gui/$(id -u)"
 
 [[ "$(uname -s)" == "Darwin" ]] || fail "this installer only supports macOS"
@@ -162,6 +174,11 @@ echo "  Managed library: $LIBRARY_ROOT"
 echo "  Import roots:    $IMPORT_ROOTS"
 echo "  Web:             $APP_URL"
 echo "  PostgreSQL:      127.0.0.1:$POSTGRES_PORT (dedicated cluster)"
+if [[ -n "$BACKUP_ROOT" ]]; then
+  echo "  Backup root:     $BACKUP_ROOT"
+else
+  echo "  Backup root:     disabled (use --backup-root /Volumes/<volume>/ApoFocusBackup)"
+fi
 if (( SKIP_MODEL_DOWNLOAD == 0 )); then
   echo "  Models:          OpenCLIP + Whisper base + LAION-CLAP (several GB)"
 else
@@ -259,9 +276,25 @@ if [[ "$LIBRARY_ROOT" == /Volumes/* ]]; then
   volume_name="${volume_name%%/*}"
   [[ -d "/Volumes/$volume_name" ]] || fail "external volume /Volumes/$volume_name is not mounted"
 fi
-mkdir -p "$STATE_DIR" "$BIN_DIR" "$MODEL_DIR" "$LOG_DIR" "$LAUNCH_AGENT_DIR" "$LIBRARY_ROOT" "$INBOX_ROOT"
+if [[ -n "$BACKUP_ROOT" ]]; then
+  backup_volume_root="${BACKUP_ROOT#/Volumes/}"
+  backup_volume_root="/Volumes/${backup_volume_root%%/*}"
+  [[ -d "$backup_volume_root" ]] || fail "external backup volume $backup_volume_root is not mounted"
+  backup_filesystem="$(/usr/sbin/diskutil info -plist "$backup_volume_root" | /usr/bin/plutil -extract FilesystemName raw -o - -)"
+  [[ "$backup_filesystem" == "APFS" ]] || fail "external backup volume must use APFS; found $backup_filesystem"
+  BACKUP_VOLUME_UUID="$(/usr/sbin/diskutil info -plist "$backup_volume_root" | /usr/bin/plutil -extract VolumeUUID raw -o - -)"
+  [[ -n "$BACKUP_VOLUME_UUID" ]] || fail "could not read Volume UUID for $backup_volume_root"
+fi
+mkdir_paths=("$STATE_DIR" "$BIN_DIR" "$MODEL_DIR" "$LOG_DIR" "$LAUNCH_AGENT_DIR" "$LIBRARY_ROOT" "$INBOX_ROOT")
+if [[ -n "$BACKUP_ROOT" ]]; then
+  mkdir_paths+=("$BACKUP_ROOT" "$BACKUP_ROOT/postgres")
+fi
+mkdir -p "${mkdir_paths[@]}"
 chmod 700 "$STATE_DIR" "$MODEL_DIR"
 chmod 750 "$BIN_DIR" "$LIBRARY_ROOT" "$INBOX_ROOT" "$LOG_DIR"
+if [[ -n "$BACKUP_ROOT" ]]; then
+  chmod 700 "$BACKUP_ROOT" "$BACKUP_ROOT/postgres"
+fi
 old_ifs="$IFS"
 IFS=':'
 read -r -a import_root_values <<< "$IMPORT_ROOTS"
@@ -277,6 +310,7 @@ mkdir -p "$STATE_DIR/cache/go-build"
 env GOCACHE="$STATE_DIR/cache/go-build" "$GO_BIN" build -trimpath -o "$BIN_DIR/apofocus" ./cmd/apofocus
 env GOCACHE="$STATE_DIR/cache/go-build" "$GO_BIN" build -trimpath -o "$BIN_DIR/apofocus-mcp" ./cmd/apofocus-mcp
 env GOCACHE="$STATE_DIR/cache/go-build" "$GO_BIN" build -trimpath -o "$BIN_DIR/apofocus-batch" ./cmd/apofocus-batch
+env GOCACHE="$STATE_DIR/cache/go-build" "$GO_BIN" build -trimpath -o "$BIN_DIR/apofocus-backup" ./cmd/apofocus-backup
 install -m 0755 "$SCRIPT_DIR/apofocusctl" "$BIN_DIR/apofocusctl"
 
 CURRENT_STEP="Python environment"
@@ -340,11 +374,15 @@ config_temporary="$CONFIG_FILE.tmp.$$"
 {
   printf 'DATABASE_URL=%q\n' "$DATABASE_URL"
   printf 'POSTGRES_BIN=%q\n' "$POSTGRES_BIN"
+  printf 'POSTGRES_DATA=%q\n' "$POSTGRES_DATA"
   printf 'POSTGRES_PORT=%q\n' "$POSTGRES_PORT"
   printf 'PHOTO_LIBRARY_ROOT=%q\n' "$LIBRARY_ROOT"
   printf 'APOFOCUS_IMPORT_ROOTS=%q\n' "$IMPORT_ROOTS"
   printf 'EMBEDDING_SERVICE_URL=%q\n' "http://127.0.0.1:8090"
   printf 'APOFOCUS_APP_URL=%q\n' "$APP_URL"
+  printf 'APOFOCUS_BACKUP_ROOT=%q\n' "$BACKUP_ROOT"
+  printf 'APOFOCUS_BACKUP_STATUS=%q\n' "$BACKUP_STATUS"
+  printf 'APOFOCUS_BACKUP_VOLUME_UUID=%q\n' "$BACKUP_VOLUME_UUID"
   printf 'ADDR=%q\n' "$ADDR"
 } > "$config_temporary"
 mv "$config_temporary" "$CONFIG_FILE"
@@ -359,6 +397,7 @@ chmod 600 "$CONFIG_FILE"
   --postgres-port "$POSTGRES_PORT" \
   --app-bin "$BIN_DIR/apofocus" \
   --mcp-bin "$BIN_DIR/apofocus-mcp" \
+  --backup-bin "$BIN_DIR/apofocus-backup" \
   --python-bin "$VENV_DIR/bin/python" \
   --embedding-dir "$SERVICE_DIR" \
   --database-url "$DATABASE_URL" \
@@ -366,14 +405,25 @@ chmod 600 "$CONFIG_FILE"
   --app-url "$APP_URL" \
   --library-root "$LIBRARY_ROOT" \
   --import-roots "$IMPORT_ROOTS" \
-  --brew-prefix "$BREW_PREFIX"
+  --brew-prefix "$BREW_PREFIX" \
+  --backup-root "$BACKUP_ROOT" \
+  --backup-status "$BACKUP_STATUS" \
+  --backup-volume-uuid "$BACKUP_VOLUME_UUID"
 
 for label in com.apofocus.postgres com.apofocus.embedding com.apofocus.web; do
   plutil -lint "$LAUNCH_AGENT_DIR/$label.plist" >/dev/null
 done
+if [[ -n "$BACKUP_ROOT" ]]; then
+  for label in com.apofocus.backup com.apofocus.backup-verify; do
+    plutil -lint "$LAUNCH_AGENT_DIR/$label.plist" >/dev/null
+  done
+fi
 
 CURRENT_STEP="LaunchAgent restart"
 launchctl print "$DOMAIN" >/dev/null 2>&1 || fail "no macOS GUI login session is available for LaunchAgents"
+for label in com.apofocus.backup-verify com.apofocus.backup; do
+  launchctl bootout "$DOMAIN/$label" >/dev/null 2>&1 || true
+done
 for label in com.apofocus.web com.apofocus.embedding com.apofocus.postgres; do
   launchctl bootout "$DOMAIN/$label" >/dev/null 2>&1 || true
 done
@@ -424,6 +474,10 @@ CURRENT_STEP="ApoFocus services"
 if (( NO_START == 0 )); then
   launchctl bootstrap "$DOMAIN" "$LAUNCH_AGENT_DIR/com.apofocus.embedding.plist"
   launchctl bootstrap "$DOMAIN" "$LAUNCH_AGENT_DIR/com.apofocus.web.plist"
+  if [[ -n "$BACKUP_ROOT" ]]; then
+    launchctl bootstrap "$DOMAIN" "$LAUNCH_AGENT_DIR/com.apofocus.backup.plist"
+    launchctl bootstrap "$DOMAIN" "$LAUNCH_AGENT_DIR/com.apofocus.backup-verify.plist"
+  fi
 
   embedding_ready=0
   web_ready=0
@@ -455,6 +509,9 @@ echo "  Control:  $BIN_DIR/apofocusctl"
 echo "  Config:   $CONFIG_FILE"
 echo "  MCP:      $STATE_DIR/mcp-server.json"
 echo "  Logs:     $LOG_DIR"
+if [[ -n "$BACKUP_ROOT" ]]; then
+  echo "  Backups:  $BACKUP_ROOT/postgres"
+fi
 if (( NO_START == 1 )); then
   echo "  Services are stopped; run: $BIN_DIR/apofocusctl start"
 else

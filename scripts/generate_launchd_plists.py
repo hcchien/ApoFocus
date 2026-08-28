@@ -18,19 +18,25 @@ def write_agent(
     working_directory: Path,
     stdout_path: Path,
     stderr_path: Path,
+    *,
+    run_at_load: bool = True,
+    keep_alive: bool = True,
+    start_calendar_interval: dict[str, int] | None = None,
 ) -> None:
     payload = {
         "Label": label,
         "ProgramArguments": arguments,
         "EnvironmentVariables": environment,
         "WorkingDirectory": str(working_directory),
-        "RunAtLoad": True,
-        "KeepAlive": True,
+        "RunAtLoad": run_at_load,
+        "KeepAlive": keep_alive,
         "ProcessType": "Background",
         "ThrottleInterval": 5,
         "StandardOutPath": str(stdout_path),
         "StandardErrorPath": str(stderr_path),
     }
+    if start_calendar_interval is not None:
+        payload["StartCalendarInterval"] = start_calendar_interval
     destination.parent.mkdir(parents=True, exist_ok=True)
     with destination.open("wb") as handle:
         plistlib.dump(payload, handle, fmt=plistlib.FMT_XML, sort_keys=False)
@@ -47,6 +53,7 @@ def main() -> None:
     parser.add_argument("--postgres-port", required=True)
     parser.add_argument("--app-bin", type=Path, required=True)
     parser.add_argument("--mcp-bin", type=Path, required=True)
+    parser.add_argument("--backup-bin", type=Path, required=True)
     parser.add_argument("--python-bin", type=Path, required=True)
     parser.add_argument("--embedding-dir", type=Path, required=True)
     parser.add_argument("--database-url", required=True)
@@ -55,6 +62,9 @@ def main() -> None:
     parser.add_argument("--library-root", type=Path, required=True)
     parser.add_argument("--import-roots", required=True)
     parser.add_argument("--brew-prefix", type=Path, required=True)
+    parser.add_argument("--backup-root", default="")
+    parser.add_argument("--backup-status", default="")
+    parser.add_argument("--backup-volume-uuid", default="")
     args = parser.parse_args()
 
     path_value = f"{args.postgres_bin}:{args.brew_prefix / 'bin'}:/usr/bin:/bin:/usr/sbin:/sbin"
@@ -81,6 +91,44 @@ def main() -> None:
         args.logs_dir / "postgres.log",
         args.logs_dir / "postgres.error.log",
     )
+
+    backup_environment = {
+        **common_environment,
+        "DATABASE_URL": args.database_url,
+        "POSTGRES_BIN": str(args.postgres_bin),
+        "POSTGRES_DATA": str(args.postgres_data),
+        "APOFOCUS_BACKUP_ROOT": args.backup_root,
+        "APOFOCUS_BACKUP_STATUS": args.backup_status,
+        "APOFOCUS_BACKUP_VOLUME_UUID": args.backup_volume_uuid,
+    }
+    if args.backup_root:
+        write_agent(
+            args.output_dir / "com.apofocus.backup.plist",
+            "com.apofocus.backup",
+            [str(args.backup_bin), "scheduled"],
+            backup_environment,
+            args.state_dir,
+            args.logs_dir / "backup.log",
+            args.logs_dir / "backup.error.log",
+            run_at_load=True,
+            keep_alive=False,
+            start_calendar_interval={"Hour": 3, "Minute": 0},
+        )
+        write_agent(
+            args.output_dir / "com.apofocus.backup-verify.plist",
+            "com.apofocus.backup-verify",
+            [str(args.backup_bin), "verify"],
+            backup_environment,
+            args.state_dir,
+            args.logs_dir / "backup-verify.log",
+            args.logs_dir / "backup-verify.error.log",
+            run_at_load=False,
+            keep_alive=False,
+            start_calendar_interval={"Day": 1, "Hour": 4, "Minute": 0},
+        )
+    else:
+        (args.output_dir / "com.apofocus.backup.plist").unlink(missing_ok=True)
+        (args.output_dir / "com.apofocus.backup-verify.plist").unlink(missing_ok=True)
 
     model_cache = args.state_dir / "models"
     photo_roots = args.import_roots.split(os.pathsep)
@@ -147,6 +195,9 @@ def main() -> None:
                     "APOFOCUS_IMPORT_ROOTS": args.import_roots,
                     "EMBEDDING_SERVICE_URL": "http://127.0.0.1:8090",
                     "APOFOCUS_APP_URL": args.app_url,
+                    "APOFOCUS_BACKUP_ROOT": args.backup_root,
+                    "APOFOCUS_BACKUP_STATUS": args.backup_status,
+                    "APOFOCUS_BACKUP_VOLUME_UUID": args.backup_volume_uuid,
                 },
             }
         }

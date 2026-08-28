@@ -45,9 +45,10 @@ func (a *HTTPAnalyzer) Analyze(ctx context.Context, path, thumbnailPath string) 
 		return Analysis{}, fmt.Errorf("embedding service returned %s: %s", response.Status, body.Detail)
 	}
 	var body struct {
-		Vector        []float32 `json:"vector"`
-		Tags          []string  `json:"tags"`
-		DominantColor string    `json:"dominantColor"`
+		Vector        []float32          `json:"vector"`
+		Tags          []string           `json:"tags"`
+		DominantColor string             `json:"dominantColor"`
+		TimingsMS     map[string]float64 `json:"timingsMs"`
 	}
 	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
 		return Analysis{}, fmt.Errorf("decode embedding service response: %w", err)
@@ -55,5 +56,5 @@ func (a *HTTPAnalyzer) Analyze(ctx context.Context, path, thumbnailPath string) 
 	if len(body.Vector) != 512 {
 		return Analysis{}, fmt.Errorf("embedding service returned %d dimensions; expected 512", len(body.Vector))
 	}
-	return Analysis{Tags: body.Tags, Embedding: body.Vector, DominantColor: body.DominantColor}, nil
+	return Analysis{Tags: body.Tags, Embedding: body.Vector, DominantColor: body.DominantColor, TimingsMS: body.TimingsMS}, nil
 }

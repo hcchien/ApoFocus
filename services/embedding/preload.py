@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import gc
 
+from PIL import features
+
 from app import (
     DEVICE,
     MODEL_NAME,
@@ -25,6 +27,10 @@ def release(*cached_functions) -> None:
 
 
 def main() -> None:
+    if not features.check("avif"):
+        raise RuntimeError("Pillow AVIF support is required")
+    print("[images] Pillow AVIF encoder is ready", flush=True)
+
     print(f"[models] OpenCLIP {MODEL_NAME}/{MODEL_WEIGHTS} on {DEVICE}", flush=True)
     load_model()
     tag_features()

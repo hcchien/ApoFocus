@@ -6,7 +6,9 @@ STATE_DIR="${APOFOCUS_STATE_DIR:-$HOME/Library/Application Support/ApoFocus}"
 CONFIG_FILE="$STATE_DIR/apofocus.env"
 LAUNCH_AGENT_DIR="$HOME/Library/LaunchAgents"
 DOMAIN="gui/$(id -u)"
-LABELS=(com.apofocus.postgres com.apofocus.embedding com.apofocus.web)
+SERVICE_LABELS=(com.apofocus.postgres com.apofocus.embedding com.apofocus.web)
+SCHEDULED_LABELS=(com.apofocus.backup com.apofocus.backup-verify)
+LABELS=("${SERVICE_LABELS[@]}" "${SCHEDULED_LABELS[@]}")
 
 if [[ -f "$CONFIG_FILE" ]]; then
   # The installer owns this file and writes shell-escaped values with mode 600.
@@ -15,14 +17,23 @@ if [[ -f "$CONFIG_FILE" ]]; then
 fi
 
 usage() {
-  echo "Usage: apofocusctl {start|stop|restart|status|doctor|logs|open}"
+  echo "Usage: apofocusctl {start|stop|restart|status|doctor|backup|verify-backup|logs|open}"
 }
 
 start_services() {
   local label plist
   for label in "${LABELS[@]}"; do
+    if [[ "$label" == com.apofocus.backup* && -z "${APOFOCUS_BACKUP_ROOT:-}" ]]; then
+      continue
+    fi
     plist="$LAUNCH_AGENT_DIR/$label.plist"
-    [[ -f "$plist" ]] || { echo "Missing $plist" >&2; exit 1; }
+    if [[ ! -f "$plist" ]]; then
+      if [[ "$label" == com.apofocus.backup* ]]; then
+        continue
+      fi
+      echo "Missing $plist" >&2
+      exit 1
+    fi
     if ! launchctl print "$DOMAIN/$label" >/dev/null 2>&1; then
       launchctl bootstrap "$DOMAIN" "$plist"
     fi
@@ -77,7 +88,26 @@ doctor() {
     echo "ApoFocus web: failed"
     failed=1
   fi
+  if [[ -n "${APOFOCUS_BACKUP_ROOT:-}" ]]; then
+    if [[ -d "$APOFOCUS_BACKUP_ROOT" ]]; then
+      echo "Backup volume: available"
+    else
+      echo "Backup volume: unavailable"
+      failed=1
+    fi
+  else
+    echo "PostgreSQL backup: not configured"
+  fi
   return "$failed"
+}
+
+kickstart_backup() {
+  local label="$1" plist="$LAUNCH_AGENT_DIR/$1.plist"
+  [[ -f "$plist" ]] || { echo "Backup is not configured; rerun the installer with --backup-root." >&2; exit 1; }
+  if ! launchctl print "$DOMAIN/$label" >/dev/null 2>&1; then
+    launchctl bootstrap "$DOMAIN" "$plist"
+  fi
+  launchctl kickstart "$DOMAIN/$label"
 }
 
 case "${1:-}" in
@@ -86,6 +116,8 @@ case "${1:-}" in
   restart) stop_services; start_services ;;
   status) status_services ;;
   doctor) doctor ;;
+  backup) kickstart_backup com.apofocus.backup ;;
+  verify-backup) kickstart_backup com.apofocus.backup-verify ;;
   logs) tail -n 100 -F "$HOME/Library/Logs/ApoFocus/"*.log ;;
   open) open "${APOFOCUS_APP_URL:-http://127.0.0.1:8080}" ;;
   *) usage; exit 2 ;;
