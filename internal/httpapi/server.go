@@ -15,6 +15,7 @@ import (
 	"github.com/hcchien/apofocus/internal/batch"
 	"github.com/hcchien/apofocus/internal/catalog"
 	"github.com/hcchien/apofocus/internal/folders"
+	"github.com/hcchien/apofocus/internal/initjob"
 	webassets "github.com/hcchien/apofocus/web"
 )
 
@@ -26,6 +27,7 @@ type Server struct {
 	folders   folders.Repository
 	batchJobs *batch.Service
 	media     catalog.MediaStore
+	initJobs  *initjob.Service
 }
 
 type Options struct {
@@ -33,6 +35,7 @@ type Options struct {
 	Folders   folders.Repository
 	BatchJobs *batch.Service
 	Media     catalog.MediaStore
+	InitJobs  *initjob.Service
 }
 
 func New(store catalog.Store, logger *slog.Logger) http.Handler {
@@ -44,7 +47,7 @@ func NewWithMedia(store catalog.Store, logger *slog.Logger, mediaRoot string) ht
 }
 
 func NewWithOptions(store catalog.Store, logger *slog.Logger, options Options) http.Handler {
-	server := &Server{store: store, logger: logger, router: http.NewServeMux(), mediaRoot: options.MediaRoot, folders: options.Folders, batchJobs: options.BatchJobs, media: options.Media}
+	server := &Server{store: store, logger: logger, router: http.NewServeMux(), mediaRoot: options.MediaRoot, folders: options.Folders, batchJobs: options.BatchJobs, media: options.Media, initJobs: options.InitJobs}
 	server.routes()
 	return server.recoverer(server.accessLog(server.securityHeaders(server.router)))
 }
@@ -55,15 +58,21 @@ func (s *Server) routes() {
 	})
 	s.router.HandleFunc("GET /api/v1/photos", s.listPhotos)
 	s.router.HandleFunc("GET /api/v1/photos/{id}", s.getPhoto)
+	s.router.HandleFunc("GET /api/v1/photos/{id}/file", s.servePhotoFile)
+	s.router.HandleFunc("PATCH /api/v1/photos/{id}", s.updatePhoto)
 	s.router.HandleFunc("GET /api/v1/photos/{id}/similar", s.similarPhotos)
 	s.router.HandleFunc("GET /api/v1/facets", s.getFacets)
 	s.router.HandleFunc("GET /api/v1/videos", func(w http.ResponseWriter, r *http.Request) { s.listMedia(w, r, "video") })
 	s.router.HandleFunc("GET /api/v1/videos/facets", func(w http.ResponseWriter, r *http.Request) { s.getMediaFacets(w, r, "video") })
 	s.router.HandleFunc("GET /api/v1/videos/{id}", func(w http.ResponseWriter, r *http.Request) { s.getMedia(w, r, "video") })
+	s.router.HandleFunc("GET /api/v1/videos/{id}/file", func(w http.ResponseWriter, r *http.Request) { s.serveCatalogMediaFile(w, r, "video") })
+	s.router.HandleFunc("PATCH /api/v1/videos/{id}", func(w http.ResponseWriter, r *http.Request) { s.updateMedia(w, r, "video") })
 	s.router.HandleFunc("GET /api/v1/videos/{id}/similar", func(w http.ResponseWriter, r *http.Request) { s.similarMedia(w, r, "video") })
 	s.router.HandleFunc("GET /api/v1/audios", func(w http.ResponseWriter, r *http.Request) { s.listMedia(w, r, "audio") })
 	s.router.HandleFunc("GET /api/v1/audios/facets", func(w http.ResponseWriter, r *http.Request) { s.getMediaFacets(w, r, "audio") })
 	s.router.HandleFunc("GET /api/v1/audios/{id}", func(w http.ResponseWriter, r *http.Request) { s.getMedia(w, r, "audio") })
+	s.router.HandleFunc("GET /api/v1/audios/{id}/file", func(w http.ResponseWriter, r *http.Request) { s.serveCatalogMediaFile(w, r, "audio") })
+	s.router.HandleFunc("PATCH /api/v1/audios/{id}", func(w http.ResponseWriter, r *http.Request) { s.updateMedia(w, r, "audio") })
 	s.router.HandleFunc("GET /api/v1/audios/{id}/similar", func(w http.ResponseWriter, r *http.Request) { s.similarMedia(w, r, "audio") })
 	if s.mediaRoot != "" {
 		s.router.HandleFunc("GET /media/{path...}", s.serveMedia)
@@ -80,6 +89,15 @@ func (s *Server) routes() {
 		s.router.HandleFunc("GET /api/v1/batch-jobs/{id}/items", s.getBatchItems)
 		s.router.HandleFunc("GET /api/v1/batch-jobs/{id}/events", s.streamBatchEvents)
 		s.router.HandleFunc("POST /api/v1/batch-jobs/{id}/cancel", s.cancelBatchJob)
+	}
+	if s.initJobs != nil {
+		s.router.HandleFunc("POST /api/v1/init-runs", s.createInitRun)
+		s.router.HandleFunc("GET /api/v1/init-runs", s.listInitRuns)
+		s.router.HandleFunc("GET /api/v1/init-runs/{id}", s.getInitRun)
+		s.router.HandleFunc("GET /api/v1/init-runs/{id}/items", s.getInitItems)
+		s.router.HandleFunc("POST /api/v1/init-runs/{id}/pause", s.pauseInitRun)
+		s.router.HandleFunc("POST /api/v1/init-runs/{id}/resume", s.resumeInitRun)
+		s.router.HandleFunc("POST /api/v1/init-runs/{id}/cancel", s.cancelInitRun)
 	}
 
 	static, err := fs.Sub(webassets.Files, "static")
@@ -112,6 +130,36 @@ func (s *Server) serveMedia(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "private, max-age=86400")
 	http.ServeFile(w, r, target)
+}
+
+func (s *Server) servePhotoFile(w http.ResponseWriter, r *http.Request) {
+	photo, err := s.store.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "photo not found")
+		return
+	}
+	serveCatalogFile(w, r, photo.Path)
+}
+func (s *Server) serveCatalogMediaFile(w http.ResponseWriter, r *http.Request, mediaType string) {
+	if s.media == nil {
+		writeError(w, http.StatusNotFound, "media not found")
+		return
+	}
+	asset, err := s.media.GetMedia(r.Context(), mediaType, r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "media not found")
+		return
+	}
+	serveCatalogFile(w, r, asset.Path)
+}
+func serveCatalogFile(w http.ResponseWriter, r *http.Request, path string) {
+	stat, err := os.Stat(path)
+	if err != nil || !stat.Mode().IsRegular() {
+		writeError(w, http.StatusNotFound, "media file unavailable")
+		return
+	}
+	w.Header().Set("Cache-Control", "private, max-age=3600")
+	http.ServeFile(w, r, path)
 }
 
 func (s *Server) listPhotos(w http.ResponseWriter, r *http.Request) {

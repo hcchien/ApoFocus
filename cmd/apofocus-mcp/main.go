@@ -18,6 +18,7 @@ import (
 	"github.com/hcchien/apofocus/internal/catalog"
 	"github.com/hcchien/apofocus/internal/folders"
 	"github.com/hcchien/apofocus/internal/ingest"
+	"github.com/hcchien/apofocus/internal/initjob"
 	"github.com/hcchien/apofocus/internal/maintenance"
 	"github.com/hcchien/apofocus/internal/mcpserver"
 	"github.com/hcchien/apofocus/internal/mediaingest"
@@ -83,6 +84,7 @@ func main() {
 		}
 	}
 	batchJobs := batch.NewService(batchRepository, manager)
+	initJobs := initjob.NewService(initjob.NewPostgresRepository(db), importRoots)
 	maintenanceManager := maintenance.NewManager(db, batchJobs, libraryRoot, importRoots, envOr("APOFOCUS_APP_URL", "http://127.0.0.1:8080"), embeddingURL)
 	serverContext, stop := context.WithCancel(context.Background())
 	defer stop()
@@ -101,6 +103,7 @@ func main() {
 	server := mcpserver.NewWithOptions(mcpserver.Options{
 		PhotoImporter: manager, MediaImporter: mediaManager, Photos: photoStore, Media: photoStore,
 		Folders: folderRepository, BatchJobs: batchJobs, Maintenance: maintenanceManager,
+		InitJobs:    initJobs,
 		Backup:      backupOperations,
 		ImportRoots: importRoots, LibraryRoot: libraryRoot,
 	})

@@ -10,6 +10,7 @@ import (
 )
 
 var ErrNotFound = errors.New("photo not found")
+var ErrConflict = errors.New("catalog revision conflict")
 
 type MemoryStore struct {
 	photos []Photo
@@ -74,6 +75,52 @@ func (s *MemoryStore) Similar(_ context.Context, id string, limit int) ([]Simila
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Similarity > result[j].Similarity })
 	return result[:min(limit, len(result))], nil
+}
+
+func (s *MemoryStore) Update(_ context.Context, id string, update PhotoUpdate) (Photo, error) {
+	for index := range s.photos {
+		photo := &s.photos[index]
+		if photo.ID != id {
+			continue
+		}
+		if update.Revision == nil || *update.Revision != photo.Revision {
+			return Photo{}, ErrConflict
+		}
+		if update.Title != nil {
+			photo.Title = strings.TrimSpace(*update.Title)
+		}
+		if update.Project != nil {
+			photo.Project = strings.TrimSpace(*update.Project)
+		}
+		if update.TakenAt != nil {
+			photo.TakenAt = *update.TakenAt
+			photo.Year = update.TakenAt.Year()
+		}
+		if update.Tags != nil {
+			photo.Tags = append([]string(nil), (*update.Tags)...)
+		}
+		if update.Camera != nil {
+			photo.Camera = strings.TrimSpace(*update.Camera)
+		}
+		if update.Lens != nil {
+			photo.Lens = strings.TrimSpace(*update.Lens)
+		}
+		if update.Description != nil {
+			photo.Description = *update.Description
+		}
+		if update.Copyright != nil {
+			photo.Copyright = *update.Copyright
+		}
+		if update.Rating != nil {
+			photo.Rating = *update.Rating
+		}
+		if update.Favorite != nil {
+			photo.Favorite = *update.Favorite
+		}
+		photo.Revision++
+		return *photo, nil
+	}
+	return Photo{}, ErrNotFound
 }
 
 func matches(photo Photo, filter Filter) bool {

@@ -58,7 +58,7 @@ func NewManagerWithOptions(database Pinger, jobs BatchLister, libraryRoot string
 }
 
 func (m *Manager) Check(ctx context.Context) (HealthReport, error) {
-	report := HealthReport{CheckedAt: m.now().UTC(), Repairable: []string{"postgres", "web", "embedding"}}
+	report := HealthReport{CheckedAt: m.now().UTC(), Repairable: []string{"postgres", "web", "embedding", "worker"}}
 	type componentResult struct {
 		name   string
 		health ComponentHealth
@@ -97,6 +97,7 @@ func (m *Manager) Check(ctx context.Context) (HealthReport, error) {
 func (m *Manager) Repair(ctx context.Context, service string) (RepairResult, error) {
 	service = strings.ToLower(strings.TrimSpace(service))
 	check := func(context.Context) ComponentHealth { return ComponentHealth{Status: StatusUnknown} }
+	launchOnly := false
 	switch service {
 	case "postgres":
 		check = m.checkDatabase
@@ -104,8 +105,10 @@ func (m *Manager) Repair(ctx context.Context, service string) (RepairResult, err
 		check = func(ctx context.Context) ComponentHealth { return m.checkEndpoint(ctx, m.webURL) }
 	case "embedding":
 		check = func(ctx context.Context) ComponentHealth { return m.checkEndpoint(ctx, m.embeddingURL) }
+	case "worker":
+		launchOnly = true
 	default:
-		return RepairResult{}, errors.New("service must be postgres, web, or embedding")
+		return RepairResult{}, errors.New("service must be postgres, web, embedding, or worker")
 	}
 	result := RepairResult{Service: service, Action: "restart", Before: check(ctx)}
 	label, err := m.controller.Restart(ctx, service)
@@ -113,6 +116,11 @@ func (m *Manager) Repair(ctx context.Context, service string) (RepairResult, err
 	if err != nil {
 		result.After = check(ctx)
 		return result, err
+	}
+	if launchOnly {
+		result.After = ComponentHealth{Status: StatusHealthy, Detail: "init worker LaunchAgent restart was accepted; verify the run heartbeat with get_init_status"}
+		result.Succeeded = true
+		return result, nil
 	}
 
 	deadline := time.NewTimer(15 * time.Second)

@@ -130,6 +130,15 @@ class AnalyzeResponse(BaseModel):
     dominant_color: str = Field(alias="dominantColor")
     timings_ms: dict[str, float] = Field(default_factory=dict, alias="timingsMs")
 
+class AnalyzeBatchRequest(BaseModel):
+    items: list[AnalyzeRequest] = Field(min_length=1, max_length=16)
+
+class AnalyzeBatchItemResponse(AnalyzeResponse):
+    path: str
+
+class AnalyzeBatchResponse(BaseModel):
+    items: list[AnalyzeBatchItemResponse]
+
 
 class AnalyzeMediaRequest(BaseModel):
     path: str
@@ -732,6 +741,26 @@ def analyze_photo(request: AnalyzeRequest) -> AnalyzeResponse:
             "totalMs": elapsed_ms(total_started),
         },
     )
+
+@app.post("/v1/analyze-batch", response_model=AnalyzeBatchResponse)
+def analyze_photo_batch(request: AnalyzeBatchRequest) -> AnalyzeBatchResponse:
+    total_started = time.perf_counter()
+    paths = [safe_path(item.path) for item in request.items]
+    images = [load_image(path) for path in paths]
+    vectors = embed_images(images)
+    results = []
+    for item, path, image, vector in zip(request.items, paths, images, vectors):
+        thumbnail_started = time.perf_counter()
+        if item.thumbnail_path:
+            is_raw = path.suffix.lower() in RAW_EXTENSIONS
+            max_edge = RAW_THUMBNAIL_MAX_EDGE if is_raw else PHOTO_THUMBNAIL_MAX_EDGE
+            quality = RAW_THUMBNAIL_QUALITY if is_raw else DERIVATIVE_IMAGE_QUALITY
+            save_derivative(make_thumbnail(image, max_edge), safe_thumbnail_path(item.thumbnail_path), quality=quality)
+        results.append(AnalyzeBatchItemResponse(
+            path=str(path), vector=vector, tags=classify(vector), dominantColor=dominant_color(image),
+            timingsMs={"thumbnailMs": elapsed_ms(thumbnail_started), "batchTotalMs": elapsed_ms(total_started)},
+        ))
+    return AnalyzeBatchResponse(items=results)
 
 
 @app.post("/v1/analyze-media", response_model=AnalyzeMediaResponse)

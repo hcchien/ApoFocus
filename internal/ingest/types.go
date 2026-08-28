@@ -64,6 +64,18 @@ type Analysis struct {
 	TimingsMS     map[string]float64
 }
 
+type AnalyzeInput struct {
+	Path          string `json:"path"`
+	ThumbnailPath string `json:"thumbnailPath"`
+}
+type BatchAnalysis struct {
+	Path     string
+	Analysis Analysis
+}
+type BatchAnalyzer interface {
+	AnalyzeBatch(context.Context, []AnalyzeInput) ([]BatchAnalysis, error)
+}
+
 type Analyzer interface {
 	Analyze(context.Context, string, string) (Analysis, error)
 }

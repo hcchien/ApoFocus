@@ -311,7 +311,10 @@ env GOCACHE="$STATE_DIR/cache/go-build" "$GO_BIN" build -trimpath -o "$BIN_DIR/a
 env GOCACHE="$STATE_DIR/cache/go-build" "$GO_BIN" build -trimpath -o "$BIN_DIR/apofocus-mcp" ./cmd/apofocus-mcp
 env GOCACHE="$STATE_DIR/cache/go-build" "$GO_BIN" build -trimpath -o "$BIN_DIR/apofocus-batch" ./cmd/apofocus-batch
 env GOCACHE="$STATE_DIR/cache/go-build" "$GO_BIN" build -trimpath -o "$BIN_DIR/apofocus-backup" ./cmd/apofocus-backup
+env GOCACHE="$STATE_DIR/cache/go-build" "$GO_BIN" build -trimpath -o "$BIN_DIR/apofocus-worker" ./cmd/apofocus-worker
+env GOCACHE="$STATE_DIR/cache/go-build" "$GO_BIN" build -trimpath -o "$BIN_DIR/apofocus-init-bin" ./cmd/apofocus-init
 install -m 0755 "$SCRIPT_DIR/apofocusctl" "$BIN_DIR/apofocusctl"
+install -m 0755 "$SCRIPT_DIR/init_library.sh" "$BIN_DIR/apofocus-init"
 
 CURRENT_STEP="Python environment"
 log "Installing Python analysis service"
@@ -396,6 +399,7 @@ chmod 600 "$CONFIG_FILE"
   --postgres-data "$POSTGRES_DATA" \
   --postgres-port "$POSTGRES_PORT" \
   --app-bin "$BIN_DIR/apofocus" \
+  --worker-bin "$BIN_DIR/apofocus-worker" \
   --mcp-bin "$BIN_DIR/apofocus-mcp" \
   --backup-bin "$BIN_DIR/apofocus-backup" \
   --python-bin "$VENV_DIR/bin/python" \
@@ -410,7 +414,7 @@ chmod 600 "$CONFIG_FILE"
   --backup-status "$BACKUP_STATUS" \
   --backup-volume-uuid "$BACKUP_VOLUME_UUID"
 
-for label in com.apofocus.postgres com.apofocus.embedding com.apofocus.web; do
+for label in com.apofocus.postgres com.apofocus.embedding com.apofocus.worker com.apofocus.web; do
   plutil -lint "$LAUNCH_AGENT_DIR/$label.plist" >/dev/null
 done
 if [[ -n "$BACKUP_ROOT" ]]; then
@@ -424,7 +428,7 @@ launchctl print "$DOMAIN" >/dev/null 2>&1 || fail "no macOS GUI login session is
 for label in com.apofocus.backup-verify com.apofocus.backup; do
   launchctl bootout "$DOMAIN/$label" >/dev/null 2>&1 || true
 done
-for label in com.apofocus.web com.apofocus.embedding com.apofocus.postgres; do
+for label in com.apofocus.web com.apofocus.worker com.apofocus.embedding com.apofocus.postgres; do
   launchctl bootout "$DOMAIN/$label" >/dev/null 2>&1 || true
 done
 wait_for_port_release "$POSTGRES_PORT" || fail "PostgreSQL port $POSTGRES_PORT is already in use; choose another --postgres-port"
@@ -466,6 +470,9 @@ fi
 if ! relation_exists storage_roots; then
   PGPASSWORD="$DB_PASSWORD" "${PSQL[@]}" -d apofocus -f "$PROJECT_ROOT/migrations/000005_storage_tracking.sql"
 fi
+if ! relation_exists init_runs; then
+  PGPASSWORD="$DB_PASSWORD" "${PSQL[@]}" -d apofocus -f "$PROJECT_ROOT/migrations/000006_editing_and_init.sql"
+fi
 
 vector_version="$(PGPASSWORD="$DB_PASSWORD" "${PSQL[@]}" -d apofocus -Atqc "SELECT extversion FROM pg_extension WHERE extname='vector'")"
 [[ -n "$vector_version" ]] || fail "pgvector extension was not created"
@@ -473,7 +480,6 @@ vector_version="$(PGPASSWORD="$DB_PASSWORD" "${PSQL[@]}" -d apofocus -Atqc "SELE
 CURRENT_STEP="ApoFocus services"
 if (( NO_START == 0 )); then
   launchctl bootstrap "$DOMAIN" "$LAUNCH_AGENT_DIR/com.apofocus.embedding.plist"
-  launchctl bootstrap "$DOMAIN" "$LAUNCH_AGENT_DIR/com.apofocus.web.plist"
   if [[ -n "$BACKUP_ROOT" ]]; then
     launchctl bootstrap "$DOMAIN" "$LAUNCH_AGENT_DIR/com.apofocus.backup.plist"
     launchctl bootstrap "$DOMAIN" "$LAUNCH_AGENT_DIR/com.apofocus.backup-verify.plist"
@@ -482,18 +488,19 @@ if (( NO_START == 0 )); then
   embedding_ready=0
   web_ready=0
   for _ in $(seq 1 120); do
-    if (( embedding_ready == 0 )) && curl -fsS http://127.0.0.1:8090/healthz >/dev/null 2>&1; then
+    if curl -fsS http://127.0.0.1:8090/healthz >/dev/null 2>&1; then
       embedding_ready=1
-    fi
-    if (( web_ready == 0 )) && curl -fsS "$APP_URL/api/v1/photos?limit=1" >/dev/null 2>&1; then
-      web_ready=1
-    fi
-    if (( embedding_ready == 1 && web_ready == 1 )); then
       break
     fi
     sleep 0.5
   done
   (( embedding_ready == 1 )) || fail "embedding service did not become ready; see $LOG_DIR/embedding.error.log"
+  launchctl bootstrap "$DOMAIN" "$LAUNCH_AGENT_DIR/com.apofocus.worker.plist"
+  launchctl bootstrap "$DOMAIN" "$LAUNCH_AGENT_DIR/com.apofocus.web.plist"
+  for _ in $(seq 1 60); do
+    if curl -fsS "$APP_URL/api/v1/photos?limit=1" >/dev/null 2>&1; then web_ready=1; break; fi
+    sleep 0.5
+  done
   (( web_ready == 1 )) || fail "web service did not become ready; see $LOG_DIR/web.error.log"
 else
   launchctl bootout "$DOMAIN/com.apofocus.postgres" >/dev/null 2>&1 || true
@@ -506,6 +513,7 @@ echo "  Web:      $APP_URL"
 echo "  Library:  $LIBRARY_ROOT"
 echo "  Inbox:    $INBOX_ROOT"
 echo "  Control:  $BIN_DIR/apofocusctl"
+echo "  Init:     $BIN_DIR/apofocus-init create --source /Volumes/<disk>"
 echo "  Config:   $CONFIG_FILE"
 echo "  MCP:      $STATE_DIR/mcp-server.json"
 echo "  Logs:     $LOG_DIR"

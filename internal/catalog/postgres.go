@@ -25,7 +25,10 @@ SELECT p.id::text, p.title, p.capture_year, COALESCE(pr.name, ''), p.taken_at,
        COALESCE(p.path, ''), COALESCE(p.thumbnail_path, ''), p.image_url, p.thumbnail_url,
        COALESCE(p.aspect_ratio, 'landscape'), COALESCE(p.dominant_color, '#757575'),
        COALESCE(p.metadata, '{}'::jsonb)::text,
-       COALESCE(p.availability_status, 'unknown'), COALESCE(p.thumbnail_status, 'unknown')
+       COALESCE(p.availability_status, 'unknown'), COALESCE(p.thumbnail_status, 'unknown'),
+       COALESCE(p.description,''),COALESCE(p.copyright,''),COALESCE(p.rating,0),COALESCE(p.favorite,false),
+       COALESCE(p.user_metadata,'{}'::jsonb)::text,COALESCE(p.revision,1),
+       COALESCE(p.content_hash_status,'completed'),COALESCE(p.ai_status,'completed')
 FROM photos p
 LEFT JOIN projects pr ON pr.id = p.project_id`
 
@@ -184,13 +187,14 @@ func scanSimilarPhoto(row scanner, similarity *float64) (Photo, error) {
 
 func scanPhotoFields(row scanner, similarity *float64) (Photo, error) {
 	var photo Photo
-	var tagsJSON, metadataJSON, locationName string
+	var tagsJSON, metadataJSON, userMetadataJSON, locationName string
 	var latitude, longitude sql.NullFloat64
 	values := []any{&photo.ID, &photo.Title, &photo.Year, &photo.Project, &photo.TakenAt, &tagsJSON,
 		&photo.Camera, &photo.Lens, &photo.Aperture, &photo.ShutterSpeed, &photo.ISO, &photo.FocalLength,
 		&photo.Dimensions, &photo.FileType, &photo.FileSize, &locationName, &latitude, &longitude,
 		&photo.Path, &photo.ThumbnailPath, &photo.ImageURL, &photo.ThumbnailURL, &photo.AspectRatio, &photo.Dominant, &metadataJSON,
-		&photo.Availability, &photo.ThumbnailState}
+		&photo.Availability, &photo.ThumbnailState, &photo.Description, &photo.Copyright, &photo.Rating, &photo.Favorite,
+		&userMetadataJSON, &photo.Revision, &photo.HashStatus, &photo.AIStatus}
 	if similarity != nil {
 		values = append([]any{similarity}, values...)
 	}
@@ -201,6 +205,9 @@ func scanPhotoFields(row scanner, similarity *float64) (Photo, error) {
 		return Photo{}, err
 	}
 	if err := json.Unmarshal([]byte(metadataJSON), &photo.Metadata); err != nil {
+		return Photo{}, err
+	}
+	if err := json.Unmarshal([]byte(userMetadataJSON), &photo.UserMetadata); err != nil {
 		return Photo{}, err
 	}
 	if latitude.Valid && longitude.Valid {

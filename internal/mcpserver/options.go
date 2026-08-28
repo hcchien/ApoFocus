@@ -8,6 +8,7 @@ import (
 	"github.com/hcchien/apofocus/internal/catalog"
 	"github.com/hcchien/apofocus/internal/folders"
 	"github.com/hcchien/apofocus/internal/ingest"
+	"github.com/hcchien/apofocus/internal/initjob"
 	"github.com/hcchien/apofocus/internal/maintenance"
 	"github.com/hcchien/apofocus/internal/mediaingest"
 )
@@ -26,6 +27,16 @@ type BatchJobs interface {
 	Resume(context.Context, string) (batch.Job, error)
 }
 
+type InitJobs interface {
+	Create(context.Context, initjob.CreateInput) (initjob.Run, error)
+	Get(context.Context, string) (initjob.Run, error)
+	List(context.Context, string, int) ([]initjob.Run, error)
+	Items(context.Context, string, int) ([]initjob.Item, error)
+	Pause(context.Context, string) error
+	Resume(context.Context, string) (initjob.Run, error)
+	Cancel(context.Context, string) error
+}
+
 type Options struct {
 	PhotoImporter *ingest.Manager
 	MediaImporter MediaImporter
@@ -33,6 +44,7 @@ type Options struct {
 	Media         catalog.MediaStore
 	Folders       folders.Repository
 	BatchJobs     BatchJobs
+	InitJobs      InitJobs
 	Maintenance   maintenance.Checker
 	Backup        backup.Operations
 	ImportRoots   []string

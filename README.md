@@ -10,17 +10,19 @@ ApoFocus 是為職業攝影師設計的照片、影片與音訊索引網站。Go
 - 以選定照片做 cosine similarity 向量搜尋
 - 桌面與手機版照片牆、篩選抽屜及相似照片介面
 - 繁體中文、英文、德文介面，依瀏覽器語言自動選擇並記住使用者設定
+- 照片、影片與音訊詳情可直接編輯標題、專題、Tags、日期、說明、Copyright、評分、精選、自訂 metadata；照片另可修正 EXIF／GeoTag，影音可修正逐字稿
 - Photos、Videos、Audios 分離的頂層 tabs，各自連接搜尋、facets、播放器與詳情 API
 - 影片固定間隔 keyframe + OpenCLIP 視覺向量；影片音軌及純音訊以 Whisper 建逐字稿、CLAP 建聲音向量
 - 影片／音訊支援 codec、長度、是否有逐字稿、專題、年份及 Tags 篩選
 - 無資料庫時自動使用內建展示資料
 - PostgreSQL schema、索引與 512 維 HNSW pgvector index
 - OpenCLIP 批次向量 worker，以及可獨立呼叫的本機 embedding API
-- 完整 MCP 操作面：照片／影音匯入、catalog 搜尋、向量相似搜尋、folders／collections，以及可監控、取消、恢復的 batch jobs
+- 完整 MCP 操作面：照片／影音匯入與人工 metadata 編輯、catalog 搜尋、向量相似搜尋、folders／collections，以及可監控、暫停、取消、恢復的 batch 與 init jobs
 - 以 SHA-256 去重；重試同一張照片不會產生重複資料
 - Finder 式虛擬資料夾：照片依年份、專題、Tags、相機與鏡頭；影片／音訊另可依 Codec 瀏覽
 - 手動 Collections 與保存 filter JSON 的智慧資料夾
 - 外接硬碟／整個 Volume 批次整理、SSE 即時進度、逐張錯誤與中止功能
+- 26TB 等級 reference Init：原檔不複製，先完成 Discovery/Fast Catalog，再批次執行 Photo AI，最後低優先處理 Video/Audio
 - Managed library filesystem watcher：檔案改名或在 library 內搬動時，自動修正 DB path；遺失與磁碟離線狀態會顯示在 UI
 - macOS 0-to-1 installer：Homebrew dependencies、專用 PostgreSQL/pgvector、Python models、Go binaries 與 LaunchAgents
 - 外接碟 PostgreSQL 自動備份：Volume UUID 防呆、每日壓縮備份、7 日／4 週／6 月保留政策、每月實際還原測試與 MCP 維運
@@ -56,7 +58,7 @@ Installer 可重複執行，會完成：
 3. 在 `~/Library/Application Support/ApoFocus` 建立獨立 PostgreSQL cluster、隨機本機密碼、Python venv、model cache 與 Go binaries，不會使用或修改既有 PostgreSQL database。
 4. 依目前 schema 狀態安全套用尚未安裝的 migrations。
 5. 預先下載並載入驗證 OpenCLIP、Whisper base 與 LAION-CLAP。
-6. 安裝 `com.apofocus.postgres`、`com.apofocus.embedding`、`com.apofocus.web` 三個常駐 LaunchAgents，登入後自動啟動並在失敗時重啟。
+6. 安裝 `com.apofocus.postgres`、`com.apofocus.embedding`、`com.apofocus.worker`、`com.apofocus.web` 四個常駐 LaunchAgents，登入後自動啟動並在失敗時重啟。Init worker 會先等模型 health endpoint ready，避免開機競速。
 7. 若提供 `--backup-root`，另安裝每日備份與每月還原驗證兩個非持續常駐 LaunchAgents，並在安裝後背景執行第一次備份與還原測試。
 8. 驗證 PostgreSQL/pgvector、embedding health endpoint 與 Web API。
 
@@ -69,6 +71,7 @@ Installer 可重複執行，會完成：
 | App、DB、venv、models | `~/Library/Application Support/ApoFocus` |
 | Logs | `~/Library/Logs/ApoFocus` |
 | MCP client 設定範本 | `~/Library/Application Support/ApoFocus/mcp-server.json` |
+| Init CLI script | `~/Library/Application Support/ApoFocus/bin/apofocus-init` |
 | Web | `http://127.0.0.1:8080` |
 
 若 library 要直接放在已掛載的外接硬碟：
@@ -157,11 +160,52 @@ make run
 | `path` | 原始照片的目前絕對路徑或儲存系統 canonical path，唯一且不對前端公開 |
 | `thumbnail_path` | 本機縮圖路徑，可為空 |
 | `storage_root_id` / `relative_path` | 指向 managed library root，並保存可隨掛載點重建的相對路徑 |
+| `thumbnail_storage_root_id` | reference init 時讓外接原檔與內建 managed thumbnail 分別追蹤磁碟狀態 |
 | `file_id` / `thumbnail_file_id` | filesystem device + inode 識別碼，用於在 rename/move event 後辨識同一檔案 |
 | `availability_status` / `thumbnail_status` | `available`、`missing`、`volume_offline` 或 `unknown` |
 | `image_url` / `thumbnail_url` | 可交付瀏覽器的 URL，建議是短效簽名 URL 或 Go 的受權限保護 route |
 | `metadata jsonb` | 未提升為常用欄位的 EXIF、IPTC、XMP 等延伸資訊 |
 | `embedding vector(512)` | 經 L2 normalization 的 OpenCLIP 影像向量 |
+
+`revision` 提供 optimistic locking；編輯 UI、HTTP API 與 MCP 必須帶回讀取時的 revision，避免人工與 worker 同時寫入時靜默覆蓋。人工 Tags 會設 `tags_user_edited`，影音逐字稿會設 `transcript_user_edited`；後續 AI 只補自己的欄位，不會覆蓋攝影師已確認的內容。
+
+## 大型媒體庫初始化
+
+Init 與一般 Batch 的語意不同：Batch 會把新檔案 copy 進 managed library；Init 預設永遠採 `reference`，只登錄外接硬碟上的 canonical path，原檔不移動、不改格式，也不再複製一份 26TB。
+
+持久化流程依序為：
+
+1. `scanning`：每個來源 root 只做目錄 Discovery，保存 path、size、mtime、file ID 與媒體類型。
+2. `cataloging`：最多 2–4 個輕量 worker 讀 EXIF 或 ffprobe，建立可立即搜尋與人工編輯的正式 `photos`／`media_assets` row；不計算 SHA-256、不載入模型。
+3. `photo_ai`：一次 claim 最多 8 張照片，以 Python `/v1/analyze-batch` 共用一次 OpenCLIP tensor batch，再個別保存 AVIF、SHA-256、向量與 AI Tags。
+4. `media_ai`：單一受控 lane 逐支處理 Video/Audio，避免 FFmpeg、Whisper、CLAP 同時搶滿 24GB RAM；這一階段可以執行數天或數週，但不影響已 cataloged 資料的使用。
+
+本機模型尚在載入或暫時離線時，Worker 仍會先完成 Discovery 與 Fast Catalog；到 AI checkpoint 才等待 `/healthz`，期間持續更新 heartbeat，也接受 pause／cancel，不會把所有檔案誤判為 AI failure。若來源直接選 `/Volumes`，catalog 會依 `/Volumes/<磁碟名稱>` 分成獨立 storage roots，並排除 ApoFocus 自己的 managed library，避免衍生縮圖被再次匯入。
+
+每個 `init_item` 有 stage、attempt count、lease owner 與 lease expiry。Worker 或 Mac 中斷後，LaunchAgent 重新啟動；heartbeat stale 兩分鐘後會自動取回中斷的 item。單檔錯誤會有限度自動重試，永久錯誤留在 DB；`resume` 只重排 failed／unfinished items，已完成部分不重做。人工 metadata 與 Tags 始終優先於恢復後的 AI 結果。
+
+安裝後可直接使用完整 script；它會安全載入 installer 產生、權限為 600 的本機設定：
+
+```bash
+INIT="$HOME/Library/Application Support/ApoFocus/bin/apofocus-init"
+
+"$INIT" create \
+  --source "/Volumes/PHOTO_ARCHIVE" \
+  --project "舊資料庫" \
+  --tag "待整理"
+
+"$INIT" list
+"$INIT" status <run-id>
+"$INIT" items <run-id>
+"$INIT" wait <run-id>
+"$INIT" pause <run-id>
+"$INIT" resume <run-id>
+"$INIT" cancel <run-id>
+```
+
+Init HTTP API 是短 request，不會碰到大型工作 timeout：`POST/GET /api/v1/init-runs`、`GET /api/v1/init-runs/{id}/items`，以及 `pause`、`resume`、`cancel` action routes。進度與 recovery state 以 PostgreSQL 為準，不依賴瀏覽器、WebSocket、terminal 或 Agent 持續在線。
+
+人工編輯 API 為 `PATCH /api/v1/photos/{id}`、`PATCH /api/v1/videos/{id}`、`PATCH /api/v1/audios/{id}`。系統欄位如 UUID、path、SHA-256、file ID、vector 與 processing status 不接受自由文字修改；搬檔必須走 filesystem operation，讓 watcher 依 file ID 同步 DB。
 
 影片與音訊存放於 `media_assets`，可搜尋的時間片段存放於 `media_segments`：影片片段保存 `visual_embedding vector(512)`，新版匯入不永久保存 `keyframe_path`；這個 nullable 欄位只保留給舊資料或未來按需產生的 storyboard cache。有音軌的影片及純音訊片段使用 `audio_embedding vector(512)`。逐字稿保留在 asset 與片段層，方便全文搜尋和播放器時間軸顯示。
 
@@ -295,7 +339,7 @@ Batch API：
 
 ## 檔案搬移與 filesystem events
 
-設定 `DATABASE_URL` 與 `PHOTO_LIBRARY_ROOT` 後，Web app 與 MCP server 會把這個路徑登記在 `storage_roots`，啟動時確認 DB 已知的原檔、縮圖與舊版可能保存的 keyframe，接著遞迴監聽 library 內的 filesystem events。
+設定 `DATABASE_URL` 與 `PHOTO_LIBRARY_ROOT` 後，Web app 會啟動 storage watcher supervisor。它除了 managed library，也會每 30 秒發現 Init 後新增的 reference roots，為每個已掛載 root 啟動一個 watcher；原檔與位於另一個磁碟的縮圖分別追蹤。
 
 - 檔案在同一個 filesystem 內改名或搬到 library 的其他資料夾時，device + inode 不變；watcher 會用 `file_id` 找到原資料並更新 `path`、`relative_path` 與瀏覽器 URL。
 - 刪除或移出 library 時，不刪 DB row，而是標成 `missing`；外接硬碟拔除時整個 root 標成 `volume_offline`。若 app 持續執行，重新掛載後會自動恢復監聽並核對已知路徑。
@@ -306,15 +350,16 @@ SHA-256 仍用於內容去重；它不能在沒有 index 或 filesystem event �
 
 ## MCP：讓 LLM 操作 ApoFocus
 
-MCP server 使用官方 Go SDK 與 stdio transport；啟用備份後完整模式共提供 28 個 tools：
+MCP server 使用官方 Go SDK 與 stdio transport；啟用備份與 Init 後完整模式共提供 37 個 tools：
 
 | 類別 | Tools | 行為 |
 |---|---|---|
 | 照片匯入 | `get_photo_import_policy`、`inspect_photo`、`import_photo` | allowlist、EXIF／GeoTag 預覽、folder、OpenCLIP Tags／向量、縮圖及 transaction 寫入 |
-| 照片搜尋 | `search_photos`、`get_photo`、`find_similar_photos` | 年份、專題、Tags、相機、鏡頭、ISO、GeoTag、全文搜尋與 pgvector 相似搜尋 |
-| 影片／音訊 | `inspect_media`、`import_media`、`search_media`、`get_media`、`find_similar_media` | metadata、逐字稿、暫存視覺取樣幀、OpenCLIP／CLAP vectors、Tags、搜尋與相似度 |
+| 照片搜尋／編輯 | `search_photos`、`get_photo`、`find_similar_photos`、`update_photo_metadata` | 年份、專題、Tags、EXIF、GeoTag、全文／向量搜尋及 revision-protected 人工修改 |
+| 影片／音訊 | `inspect_media`、`import_media`、`search_media`、`get_media`、`find_similar_media`、`update_media_metadata` | metadata、逐字稿、OpenCLIP／CLAP vectors、搜尋、相似度與人工修正 |
 | 虛擬資料夾 | `browse_folders`、`create_collection`、`add_photos_to_collection`、`get_collection_photos` | facets、Finder 式 browsing、manual／smart collections；`browse_folders.locale` 支援 `zh-TW`、`en`、`de` |
 | Batch | `create_batch_job`、`list_batch_jobs`、`get_batch_job`、`wait_batch_job`、`list_batch_items`、`cancel_batch_job`、`resume_batch_job` | 建立與找回持久化工作、短輪詢監控、逐檔錯誤、取消與安全恢復；狀態 label 支援三種語言 |
+| Init | `create_init_run`、`get_init_status`、`list_init_runs`、`list_init_items`、`pause_init_run`、`resume_init_run`、`cancel_init_run` | reference 大型初始化、phase/ETA、heartbeat、逐檔診斷、checkpoint pause 與中斷恢復 |
 | 維運 | `get_system_health`、`diagnose_batch_job`、`repair_managed_service` | 檢查 DB、Web／Worker、模型服務、heartbeat、路徑與磁碟空間；診斷後只允許重啟固定 LaunchAgents |
 | 備份 | `get_backup_health`、`run_backup`、`verify_backup` | 檢查 Volume UUID、空間、最新備份、還原驗證與錯誤；只允許非同步觸發兩個固定 backup LaunchAgents |
 
@@ -342,7 +387,8 @@ export APOFOCUS_BACKUP_STATUS="$HOME/Library/Application Support/ApoFocus/backup
 export APOFOCUS_BACKUP_VOLUME_UUID='<diskutil reported UUID>'
 
 make embedding-serve   # terminal 1
-make run               # terminal 2，包含 Web API 與 Batch Worker
+make run               # terminal 2，包含 Web API 與一般 Batch Worker
+make build-worker      # Init worker；正式安裝由 com.apofocus.worker 管理
 make build-mcp         # 產生 bin/apofocus-mcp，交由 LLM client 啟動
 ```
 
@@ -384,7 +430,7 @@ make build-mcp         # 產生 bin/apofocus-mcp，交由 LLM client 啟動
 
 1. 呼叫 `get_system_health`，檢查 PostgreSQL、Web／Worker、embedding service、Batch heartbeat、library／import roots 與磁碟空間。
 2. 以 `list_batch_jobs` 找回近期工作，再對目標呼叫 `diagnose_batch_job`。診斷會區分正常長時間分析、stale heartbeat、服務停止、來源硬碟離線、library 空間不足和可重試的終止工作。
-3. 若診斷建議修復，才呼叫 `repair_managed_service` 並傳入 `confirmed: true`。`service` 只接受 `postgres`、`web` 或 `embedding`，底層只執行對應的 `com.apofocus.*` LaunchAgent restart，不接受 command、argument 或任意 shell input。
+3. 若診斷建議修復，才呼叫 `repair_managed_service` 並傳入 `confirmed: true`。`service` 只接受 `postgres`、`web`、`embedding` 或 `worker`，底層只執行對應的固定 `com.apofocus.*` LaunchAgent restart，不接受 command、argument 或任意 shell input。`worker` 重啟後再用 `get_init_status` 確認 heartbeat 已恢復。
 4. 再次呼叫 `get_system_health`。服務恢復後，stale 的 active job 會由 Worker 自動接手；只有 `failed`、`cancelled` 或 `completed_with_errors` 才需要呼叫 `resume_batch_job`。
 5. 若使用者詢問備份，呼叫 `get_backup_health`。只有在 Volume UUID 與可用空間正常時才呼叫 `run_backup` 或 `verify_backup`，接著用 `get_backup_health` 追蹤 `runningOperation`、`lastBackupAt`、`lastVerifiedAt` 與 `lastError`。
 

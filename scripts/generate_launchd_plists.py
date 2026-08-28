@@ -52,6 +52,7 @@ def main() -> None:
     parser.add_argument("--postgres-data", type=Path, required=True)
     parser.add_argument("--postgres-port", required=True)
     parser.add_argument("--app-bin", type=Path, required=True)
+    parser.add_argument("--worker-bin", type=Path, required=True)
     parser.add_argument("--mcp-bin", type=Path, required=True)
     parser.add_argument("--backup-bin", type=Path, required=True)
     parser.add_argument("--python-bin", type=Path, required=True)
@@ -183,6 +184,24 @@ def main() -> None:
         args.state_dir,
         args.logs_dir / "web.log",
         args.logs_dir / "web.error.log",
+    )
+
+    worker_environment = {
+        **common_environment,
+        "DATABASE_URL": args.database_url,
+        "PHOTO_LIBRARY_ROOT": str(args.library_root),
+        "APOFOCUS_IMPORT_ROOTS": args.import_roots,
+        "EMBEDDING_SERVICE_URL": "http://127.0.0.1:8090",
+        "APOFOCUS_CATALOG_WORKERS": "2",
+    }
+    write_agent(
+        args.output_dir / "com.apofocus.worker.plist",
+        "com.apofocus.worker",
+        [str(args.worker_bin)],
+        worker_environment,
+        args.state_dir,
+        args.logs_dir / "worker.log",
+        args.logs_dir / "worker.error.log",
     )
 
     mcp_config = {

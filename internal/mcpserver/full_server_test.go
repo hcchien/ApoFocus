@@ -12,6 +12,7 @@ import (
 	"github.com/hcchien/apofocus/internal/catalog"
 	"github.com/hcchien/apofocus/internal/folders"
 	"github.com/hcchien/apofocus/internal/ingest"
+	"github.com/hcchien/apofocus/internal/initjob"
 	"github.com/hcchien/apofocus/internal/maintenance"
 	"github.com/hcchien/apofocus/internal/mediaingest"
 )
@@ -29,6 +30,9 @@ func (fakeMediaStore) MediaFacets(context.Context, string) (catalog.MediaFacets,
 }
 func (fakeMediaStore) SimilarMedia(context.Context, string, string, string, int) ([]catalog.SimilarMedia, error) {
 	return nil, nil
+}
+func (fakeMediaStore) UpdateMedia(context.Context, string, string, catalog.MediaUpdate) (catalog.MediaAsset, error) {
+	return catalog.MediaAsset{}, nil
 }
 
 type fakeMediaImporter struct{}
@@ -62,6 +66,20 @@ func (f *fakeBatchJobs) Items(context.Context, string, int) ([]batch.Item, error
 func (f *fakeBatchJobs) Cancel(context.Context, string) error                     { return nil }
 func (f *fakeBatchJobs) Resume(context.Context, string) (batch.Job, error)        { return f.job, nil }
 
+type fakeInitJobs struct{ run initjob.Run }
+
+func (f *fakeInitJobs) Create(context.Context, initjob.CreateInput) (initjob.Run, error) {
+	return f.run, nil
+}
+func (f *fakeInitJobs) Get(context.Context, string) (initjob.Run, error) { return f.run, nil }
+func (f *fakeInitJobs) List(context.Context, string, int) ([]initjob.Run, error) {
+	return []initjob.Run{f.run}, nil
+}
+func (f *fakeInitJobs) Items(context.Context, string, int) ([]initjob.Item, error) { return nil, nil }
+func (f *fakeInitJobs) Pause(context.Context, string) error                        { return nil }
+func (f *fakeInitJobs) Resume(context.Context, string) (initjob.Run, error)        { return f.run, nil }
+func (f *fakeInitJobs) Cancel(context.Context, string) error                       { return nil }
+
 type fakeMaintenance struct{ report maintenance.HealthReport }
 
 func (f fakeMaintenance) Check(context.Context) (maintenance.HealthReport, error) {
@@ -90,10 +108,11 @@ func TestFullServerAdvertisesCompleteToolset(t *testing.T) {
 	}
 	now := time.Now()
 	jobs := &fakeBatchJobs{job: batch.Job{ID: "job", SourceRoot: inbox, Status: "running", DiscoveredCount: 10, ProcessedCount: 4, CreatedAt: now, HeartbeatAt: &now}}
+	initJobs := &fakeInitJobs{run: initjob.Run{ID: "init", SourceRoot: inbox, Status: "cataloging", DiscoveredCount: 10, CatalogedCount: 4, CreatedAt: now, HeartbeatAt: &now}}
 	health := maintenance.HealthReport{Status: maintenance.StatusHealthy, Database: maintenance.ComponentHealth{Status: maintenance.StatusHealthy}, Web: maintenance.ComponentHealth{Status: maintenance.StatusHealthy}, Embedding: maintenance.ComponentHealth{Status: maintenance.StatusHealthy}, Worker: maintenance.WorkerHealth{Status: maintenance.StatusHealthy}}
 	server := NewWithOptions(Options{
 		PhotoImporter: manager, MediaImporter: fakeMediaImporter{}, Photos: catalog.NewMemoryStore(), Media: fakeMediaStore{},
-		Folders: fakeFolders{}, BatchJobs: jobs, Maintenance: fakeMaintenance{report: health},
+		Folders: fakeFolders{}, BatchJobs: jobs, InitJobs: initJobs, Maintenance: fakeMaintenance{report: health},
 		Backup:      fakeBackup{report: backup.HealthReport{Status: backup.StatusHealthy, Configured: true, RootAvailable: true}},
 		ImportRoots: []string{inbox}, LibraryRoot: library,
 	})
@@ -114,7 +133,7 @@ func TestFullServerAdvertisesCompleteToolset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wanted := []string{"get_photo_import_policy", "inspect_photo", "import_photo", "search_photos", "get_photo", "find_similar_photos", "search_media", "get_media", "find_similar_media", "inspect_media", "import_media", "browse_folders", "create_collection", "add_photos_to_collection", "get_collection_photos", "create_batch_job", "get_batch_job", "list_batch_jobs", "wait_batch_job", "list_batch_items", "cancel_batch_job", "resume_batch_job", "get_system_health", "diagnose_batch_job", "repair_managed_service", "get_backup_health", "run_backup", "verify_backup"}
+	wanted := []string{"get_photo_import_policy", "inspect_photo", "import_photo", "search_photos", "get_photo", "find_similar_photos", "update_photo_metadata", "search_media", "get_media", "find_similar_media", "update_media_metadata", "inspect_media", "import_media", "browse_folders", "create_collection", "add_photos_to_collection", "get_collection_photos", "create_batch_job", "get_batch_job", "list_batch_jobs", "wait_batch_job", "list_batch_items", "cancel_batch_job", "resume_batch_job", "create_init_run", "get_init_status", "list_init_runs", "list_init_items", "pause_init_run", "resume_init_run", "cancel_init_run", "get_system_health", "diagnose_batch_job", "repair_managed_service", "get_backup_health", "run_backup", "verify_backup"}
 	seen := map[string]bool{}
 	for _, tool := range tools.Tools {
 		seen[tool.Name] = true

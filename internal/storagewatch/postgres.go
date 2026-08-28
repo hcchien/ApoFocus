@@ -17,6 +17,23 @@ type PostgresRepository struct{ db *sql.DB }
 
 func NewPostgresRepository(db *sql.DB) *PostgresRepository { return &PostgresRepository{db: db} }
 
+func (r *PostgresRepository) ListRoots(ctx context.Context) ([]Root, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT id::text,name,base_path,volume_id,status,last_seen_at,last_event_at FROM storage_roots ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	roots := []Root{}
+	for rows.Next() {
+		var root Root
+		if err := rows.Scan(&root.ID, &root.Name, &root.BasePath, &root.VolumeID, &root.Status, &root.LastSeenAt, &root.LastEvent); err != nil {
+			return nil, err
+		}
+		roots = append(roots, root)
+	}
+	return roots, rows.Err()
+}
+
 func (r *PostgresRepository) EnsureRoot(ctx context.Context, configuredPath string) (Root, error) {
 	absolute, err := filepath.Abs(configuredPath)
 	if err != nil {
@@ -121,9 +138,9 @@ func (r *PostgresRepository) VerifyKnownPaths(ctx context.Context, root Root) er
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT kind,path FROM (
 			SELECT 'photo_original' AS kind,path FROM photos WHERE storage_root_id=$1
-			UNION ALL SELECT 'photo_thumbnail',thumbnail_path FROM photos WHERE storage_root_id=$1 AND thumbnail_path IS NOT NULL
+			UNION ALL SELECT 'photo_thumbnail',thumbnail_path FROM photos WHERE COALESCE(thumbnail_storage_root_id,storage_root_id)=$1 AND thumbnail_path IS NOT NULL
 			UNION ALL SELECT 'media_original',path FROM media_assets WHERE storage_root_id=$1
-			UNION ALL SELECT 'media_thumbnail',thumbnail_path FROM media_assets WHERE storage_root_id=$1 AND thumbnail_path IS NOT NULL
+			UNION ALL SELECT 'media_thumbnail',thumbnail_path FROM media_assets WHERE COALESCE(thumbnail_storage_root_id,storage_root_id)=$1 AND thumbnail_path IS NOT NULL
 			UNION ALL SELECT 'segment_keyframe',ms.keyframe_path FROM media_segments ms JOIN media_assets ma ON ma.id=ms.media_asset_id WHERE ma.storage_root_id=$1 AND ms.keyframe_path IS NOT NULL
 		) known ORDER BY path`, root.ID)
 	if err != nil {
@@ -180,14 +197,14 @@ func (r *PostgresRepository) observePath(ctx context.Context, root Root, previou
 	}
 	defer func() { _ = tx.Rollback() }()
 	queries := []string{
-		`UPDATE photos SET path=$3,relative_path=$4,image_url=$5,file_id=NULLIF($6,''),availability_status='available',last_verified_at=now(),updated_at=now()
+		`UPDATE photos SET path=$3,relative_path=$4,image_url='/api/v1/photos/'||id::text||'/file',file_id=NULLIF($6,''),availability_status='available',last_verified_at=now(),updated_at=now()
 		 WHERE storage_root_id=$1 AND ((file_id IS NOT NULL AND file_id=$6) OR path=$2)`,
 		`UPDATE photos SET thumbnail_path=$3,thumbnail_relative_path=$4,thumbnail_url=$5,thumbnail_file_id=NULLIF($6,''),thumbnail_status='available',last_verified_at=now(),updated_at=now()
-		 WHERE storage_root_id=$1 AND ((thumbnail_file_id IS NOT NULL AND thumbnail_file_id=$6) OR thumbnail_path=$2)`,
-		`UPDATE media_assets SET path=$3,relative_path=$4,media_url=$5,file_id=NULLIF($6,''),availability_status='available',last_verified_at=now(),updated_at=now()
+		 WHERE COALESCE(thumbnail_storage_root_id,storage_root_id)=$1 AND ((thumbnail_file_id IS NOT NULL AND thumbnail_file_id=$6) OR thumbnail_path=$2)`,
+		`UPDATE media_assets SET path=$3,relative_path=$4,media_url='/api/v1/'||CASE WHEN media_type='video' THEN 'videos' ELSE 'audios' END||'/'||id::text||'/file',file_id=NULLIF($6,''),availability_status='available',last_verified_at=now(),updated_at=now()
 		 WHERE storage_root_id=$1 AND ((file_id IS NOT NULL AND file_id=$6) OR path=$2)`,
 		`UPDATE media_assets SET thumbnail_path=$3,thumbnail_relative_path=$4,thumbnail_url=$5,thumbnail_file_id=NULLIF($6,''),thumbnail_status='available',last_verified_at=now(),updated_at=now()
-		 WHERE storage_root_id=$1 AND ((thumbnail_file_id IS NOT NULL AND thumbnail_file_id=$6) OR thumbnail_path=$2)`,
+		 WHERE COALESCE(thumbnail_storage_root_id,storage_root_id)=$1 AND ((thumbnail_file_id IS NOT NULL AND thumbnail_file_id=$6) OR thumbnail_path=$2)`,
 		`UPDATE media_segments ms SET keyframe_path=$3,keyframe_relative_path=$4,keyframe_url=$5,keyframe_file_id=NULLIF($6,''),keyframe_status='available',last_verified_at=now()
 		 FROM media_assets ma WHERE ma.id=ms.media_asset_id AND ma.storage_root_id=$1
 		 AND ((ms.keyframe_file_id IS NOT NULL AND ms.keyframe_file_id=$6) OR ms.keyframe_path=$2)`,
@@ -206,9 +223,9 @@ func (r *PostgresRepository) observePath(ctx context.Context, root Root, previou
 func (r *PostgresRepository) MarkMissing(ctx context.Context, root Root, path string) error {
 	queries := []string{
 		`UPDATE photos SET availability_status='missing',last_verified_at=now(),updated_at=now() WHERE storage_root_id=$1 AND (path=$2 OR left(path,length($2)+1)=$2||'/')`,
-		`UPDATE photos SET thumbnail_status='missing',last_verified_at=now(),updated_at=now() WHERE storage_root_id=$1 AND thumbnail_path IS NOT NULL AND (thumbnail_path=$2 OR left(thumbnail_path,length($2)+1)=$2||'/')`,
+		`UPDATE photos SET thumbnail_status='missing',last_verified_at=now(),updated_at=now() WHERE COALESCE(thumbnail_storage_root_id,storage_root_id)=$1 AND thumbnail_path IS NOT NULL AND (thumbnail_path=$2 OR left(thumbnail_path,length($2)+1)=$2||'/')`,
 		`UPDATE media_assets SET availability_status='missing',last_verified_at=now(),updated_at=now() WHERE storage_root_id=$1 AND (path=$2 OR left(path,length($2)+1)=$2||'/')`,
-		`UPDATE media_assets SET thumbnail_status='missing',last_verified_at=now(),updated_at=now() WHERE storage_root_id=$1 AND thumbnail_path IS NOT NULL AND (thumbnail_path=$2 OR left(thumbnail_path,length($2)+1)=$2||'/')`,
+		`UPDATE media_assets SET thumbnail_status='missing',last_verified_at=now(),updated_at=now() WHERE COALESCE(thumbnail_storage_root_id,storage_root_id)=$1 AND thumbnail_path IS NOT NULL AND (thumbnail_path=$2 OR left(thumbnail_path,length($2)+1)=$2||'/')`,
 		`UPDATE media_segments ms SET keyframe_status='missing',last_verified_at=now() FROM media_assets ma WHERE ma.id=ms.media_asset_id AND ma.storage_root_id=$1 AND ms.keyframe_path IS NOT NULL AND (ms.keyframe_path=$2 OR left(ms.keyframe_path,length($2)+1)=$2||'/')`,
 	}
 	tx, err := r.db.BeginTx(ctx, nil)
@@ -245,8 +262,10 @@ func (r *PostgresRepository) markRootAvailability(ctx context.Context, rootID, s
 		}
 	}
 	for _, query := range []string{
-		`UPDATE photos SET availability_status=$2,thumbnail_status=CASE WHEN thumbnail_path IS NULL THEN thumbnail_status ELSE $2 END,last_verified_at=now() WHERE storage_root_id=$1`,
-		`UPDATE media_assets SET availability_status=$2,thumbnail_status=CASE WHEN thumbnail_path IS NULL THEN thumbnail_status ELSE $2 END,last_verified_at=now() WHERE storage_root_id=$1`,
+		`UPDATE photos SET availability_status=$2,last_verified_at=now() WHERE storage_root_id=$1`,
+		`UPDATE photos SET thumbnail_status=$2,last_verified_at=now() WHERE COALESCE(thumbnail_storage_root_id,storage_root_id)=$1 AND thumbnail_path IS NOT NULL`,
+		`UPDATE media_assets SET availability_status=$2,last_verified_at=now() WHERE storage_root_id=$1`,
+		`UPDATE media_assets SET thumbnail_status=$2,last_verified_at=now() WHERE COALESCE(thumbnail_storage_root_id,storage_root_id)=$1 AND thumbnail_path IS NOT NULL`,
 		`UPDATE media_segments ms SET keyframe_status=$2,last_verified_at=now() FROM media_assets ma WHERE ma.id=ms.media_asset_id AND ma.storage_root_id=$1 AND ms.keyframe_path IS NOT NULL`,
 	} {
 		if _, err := tx.ExecContext(ctx, query, rootID, status); err != nil {

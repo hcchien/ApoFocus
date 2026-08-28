@@ -20,6 +20,7 @@ import (
 	"github.com/hcchien/apofocus/internal/folders"
 	"github.com/hcchien/apofocus/internal/httpapi"
 	"github.com/hcchien/apofocus/internal/ingest"
+	"github.com/hcchien/apofocus/internal/initjob"
 	"github.com/hcchien/apofocus/internal/mediaingest"
 	"github.com/hcchien/apofocus/internal/storagewatch"
 )
@@ -56,17 +57,13 @@ func main() {
 				options.MediaRoot = root.BasePath
 				storageRootID = root.ID
 				libraryOnline = true
-				watcher, watcherErr := storagewatch.NewWatcher(root, storageRepository, logger)
-				if watcherErr != nil {
-					logger.Error("watch managed library", "error", watcherErr)
-					os.Exit(1)
-				}
+				watcher := storagewatch.NewSupervisor(storageRepository, logger)
 				go func() {
 					if watchErr := watcher.Run(ctx); watchErr != nil && !errors.Is(watchErr, context.Canceled) {
 						logger.Error("filesystem watcher stopped", "error", watchErr)
 					}
 				}()
-				logger.Info("managed library filesystem watcher enabled", "path", root.BasePath)
+				logger.Info("storage watcher supervisor enabled")
 			}
 		}
 		if rootsValue := os.Getenv("APOFOCUS_IMPORT_ROOTS"); libraryOnline && rootsValue != "" {
@@ -82,7 +79,9 @@ func main() {
 				os.Exit(1)
 			}
 			batchRepository := batch.NewPostgresRepository(db)
+			initRepository := initjob.NewPostgresRepository(db)
 			options.BatchJobs = batch.NewService(batchRepository, manager)
+			options.InitJobs = initjob.NewService(initRepository, splitPaths(rootsValue))
 			worker := batch.NewWorker(batchRepository, manager, mediaManager)
 			go func() {
 				if workerErr := worker.Run(ctx); workerErr != nil && !errors.Is(workerErr, context.Canceled) {

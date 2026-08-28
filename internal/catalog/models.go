@@ -37,7 +37,36 @@ type Photo struct {
 	Availability   string         `json:"availabilityStatus"`
 	ThumbnailState string         `json:"thumbnailStatus"`
 	Metadata       map[string]any `json:"metadata,omitempty"`
+	Description    string         `json:"description"`
+	Copyright      string         `json:"copyright"`
+	Rating         int            `json:"rating"`
+	Favorite       bool           `json:"favorite"`
+	UserMetadata   map[string]any `json:"userMetadata,omitempty"`
+	Revision       int64          `json:"revision"`
+	HashStatus     string         `json:"hashStatus"`
+	AIStatus       string         `json:"aiStatus"`
 	Embedding      []float32      `json:"-"`
+}
+
+type PhotoUpdate struct {
+	Title         *string         `json:"title,omitempty"`
+	Project       *string         `json:"project,omitempty"`
+	TakenAt       *time.Time      `json:"takenAt,omitempty"`
+	Tags          *[]string       `json:"tags,omitempty"`
+	Camera        *string         `json:"camera,omitempty"`
+	Lens          *string         `json:"lens,omitempty"`
+	Aperture      *string         `json:"aperture,omitempty"`
+	ShutterSpeed  *string         `json:"shutterSpeed,omitempty"`
+	ISO           *int            `json:"iso,omitempty"`
+	FocalLength   *string         `json:"focalLength,omitempty"`
+	Location      *Location       `json:"location,omitempty"`
+	ClearLocation bool            `json:"clearLocation,omitempty"`
+	Description   *string         `json:"description,omitempty"`
+	Copyright     *string         `json:"copyright,omitempty"`
+	Rating        *int            `json:"rating,omitempty"`
+	Favorite      *bool           `json:"favorite,omitempty"`
+	UserMetadata  *map[string]any `json:"userMetadata,omitempty"`
+	Revision      *int64          `json:"revision"`
 }
 
 type Filter struct {
@@ -84,4 +113,5 @@ type Store interface {
 	Get(context.Context, string) (Photo, error)
 	Facets(context.Context) (Facets, error)
 	Similar(context.Context, string, int) ([]SimilarPhoto, error)
+	Update(context.Context, string, PhotoUpdate) (Photo, error)
 }

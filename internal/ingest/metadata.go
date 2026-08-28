@@ -83,6 +83,22 @@ func readMetadata(path string, fallbackTime time.Time) (Inspection, error) {
 	return result, nil
 }
 
+// ReadFastMetadata reads file headers and EXIF without hashing, decoding a full
+// RAW image, generating derivatives, or loading an ML model. Init cataloging
+// uses it so records become searchable before background AI work starts.
+func ReadFastMetadata(path string) (Inspection, error) {
+	stat, err := os.Stat(path)
+	if err != nil {
+		return Inspection{}, err
+	}
+	result, err := readMetadata(path, stat.ModTime())
+	if err != nil {
+		return Inspection{}, err
+	}
+	result.SourcePath = path
+	return result, nil
+}
+
 func orientedDimensions(width, height, orientation int) (int, int) {
 	if orientation >= 5 && orientation <= 8 {
 		return height, width

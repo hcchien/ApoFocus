@@ -52,6 +52,34 @@ func TestSimilarPhotosAPI(t *testing.T) {
 	}
 }
 
+func TestUpdatePhotoAPI(t *testing.T) {
+	server := testServer()
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/photos/a1", strings.NewReader(`{"title":"人工標題","tags":["人工","精選"],"rating":5,"revision":0}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body.String())
+	}
+	var photo catalog.Photo
+	if err := json.NewDecoder(response.Body).Decode(&photo); err != nil {
+		t.Fatal(err)
+	}
+	if photo.Title != "人工標題" || photo.Rating != 5 || len(photo.Tags) != 2 {
+		t.Fatalf("unexpected update: %+v", photo)
+	}
+}
+
+func TestUpdatePhotoRequiresRevision(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/photos/a1", strings.NewReader(`{"title":"沒有 revision"}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	testServer().ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "revision is required") {
+		t.Fatalf("expected revision validation, got %d: %s", response.Code, response.Body.String())
+	}
+}
+
 func TestInvalidLocationFilter(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/photos?has_location=maybe", nil)
 	response := httptest.NewRecorder()

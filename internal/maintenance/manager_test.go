@@ -111,6 +111,19 @@ func TestRepairUsesAllowlistedControllerAndWaitsForHealth(t *testing.T) {
 	}
 }
 
+func TestRepairAllowsFixedInitWorkerLaunchAgent(t *testing.T) {
+	controller := &fakeController{}
+	manager := NewManagerWithOptions(fakePinger{}, fakeJobs{}, t.TempDir(), nil, "http://web", "http://embedding", Options{Controller: controller, HTTPClient: healthClient(func() int { return http.StatusOK })})
+
+	result, err := manager.Repair(context.Background(), "worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if controller.restarted != "worker" || result.Label != "com.apofocus.worker" || !result.Succeeded || result.After.Status != StatusHealthy {
+		t.Fatalf("unexpected worker repair result: %+v", result)
+	}
+}
+
 func TestCheckSurfacesDatabaseFailure(t *testing.T) {
 	manager := NewManagerWithOptions(fakePinger{err: errors.New("database offline")}, fakeJobs{}, t.TempDir(), nil, "http://web", "http://embedding", Options{HTTPClient: healthClient(func() int { return http.StatusOK })})
 	report, err := manager.Check(context.Background())

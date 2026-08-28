@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -59,6 +60,46 @@ type SimilarMediaInput struct {
 	Limit     int    `json:"limit,omitempty" jsonschema:"number of similar assets from 1 to 24; defaults to 6"`
 }
 
+type UpdatePhotoInput struct {
+	PhotoID       string            `json:"photo_id" jsonschema:"ApoFocus photo UUID"`
+	Title         *string           `json:"title,omitempty" jsonschema:"photographer-authored title"`
+	Project       *string           `json:"project,omitempty" jsonschema:"project or story; an empty value clears it"`
+	TakenAt       *string           `json:"taken_at,omitempty" jsonschema:"RFC3339 capture date and time"`
+	Tags          *[]string         `json:"tags,omitempty" jsonschema:"complete photographer-authored tag list"`
+	Camera        *string           `json:"camera,omitempty" jsonschema:"corrected camera model"`
+	Lens          *string           `json:"lens,omitempty" jsonschema:"corrected lens model"`
+	Aperture      *string           `json:"aperture,omitempty"`
+	ShutterSpeed  *string           `json:"shutter_speed,omitempty"`
+	ISO           *int              `json:"iso,omitempty"`
+	FocalLength   *string           `json:"focal_length,omitempty"`
+	Location      *catalog.Location `json:"location,omitempty" jsonschema:"corrected location and coordinates"`
+	ClearLocation bool              `json:"clear_location,omitempty"`
+	Description   *string           `json:"description,omitempty"`
+	Copyright     *string           `json:"copyright,omitempty"`
+	Rating        *int              `json:"rating,omitempty" jsonschema:"rating from 0 to 5"`
+	Favorite      *bool             `json:"favorite,omitempty"`
+	UserMetadata  *map[string]any   `json:"user_metadata,omitempty"`
+	Revision      *int64            `json:"revision" jsonschema:"required revision returned by get_photo; prevents overwriting concurrent edits"`
+	Confirmed     bool              `json:"confirmed" jsonschema:"must be true after the user approves this catalog edit"`
+}
+
+type UpdateMediaInput struct {
+	MediaType    string          `json:"media_type" jsonschema:"video or audio"`
+	AssetID      string          `json:"asset_id" jsonschema:"ApoFocus media asset UUID"`
+	Title        *string         `json:"title,omitempty"`
+	Project      *string         `json:"project,omitempty"`
+	RecordedAt   *string         `json:"recorded_at,omitempty" jsonschema:"RFC3339 recording date and time"`
+	Tags         *[]string       `json:"tags,omitempty"`
+	Description  *string         `json:"description,omitempty"`
+	Copyright    *string         `json:"copyright,omitempty"`
+	Rating       *int            `json:"rating,omitempty" jsonschema:"rating from 0 to 5"`
+	Favorite     *bool           `json:"favorite,omitempty"`
+	Transcript   *string         `json:"transcript,omitempty" jsonschema:"photographer-corrected transcript"`
+	UserMetadata *map[string]any `json:"user_metadata,omitempty"`
+	Revision     *int64          `json:"revision" jsonschema:"required revision returned by get_media"`
+	Confirmed    bool            `json:"confirmed"`
+}
+
 func addPhotoCatalogTools(server *mcp.Server, store catalog.Store) {
 	readOnly, closedWorld := true, false
 	mcp.AddTool(server, &mcp.Tool{
@@ -81,6 +122,29 @@ func addPhotoCatalogTools(server *mcp.Server, store catalog.Store) {
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, input SimilarPhotosInput) (*mcp.CallToolResult, []catalog.SimilarPhoto, error) {
 		items, err := store.Similar(ctx, strings.TrimSpace(input.PhotoID), bounded(input.Limit, 6, 1, 24))
 		return nil, items, err
+	})
+	additive := false
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "update_photo_metadata", Title: "Update photo metadata",
+		Description: "Update photographer-controlled fields without changing the file path, hash, vector, or system status. User tags replace the visible tag list and take precedence over later AI work.",
+		Annotations: &mcp.ToolAnnotations{Title: "Update photo metadata", ReadOnlyHint: false, IdempotentHint: false, DestructiveHint: &additive, OpenWorldHint: &closedWorld},
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, input UpdatePhotoInput) (*mcp.CallToolResult, catalog.Photo, error) {
+		if !input.Confirmed {
+			return nil, catalog.Photo{}, errors.New("confirmed must be true after the user approves the edit")
+		}
+		if input.Revision == nil {
+			return nil, catalog.Photo{}, errors.New("revision is required; call get_photo before editing")
+		}
+		var takenAt *time.Time
+		if input.TakenAt != nil {
+			parsed, err := time.Parse(time.RFC3339, *input.TakenAt)
+			if err != nil {
+				return nil, catalog.Photo{}, errors.New("taken_at must be RFC3339")
+			}
+			takenAt = &parsed
+		}
+		photo, err := store.Update(ctx, strings.TrimSpace(input.PhotoID), catalog.PhotoUpdate{Title: input.Title, Project: input.Project, TakenAt: takenAt, Tags: input.Tags, Camera: input.Camera, Lens: input.Lens, Aperture: input.Aperture, ShutterSpeed: input.ShutterSpeed, ISO: input.ISO, FocalLength: input.FocalLength, Location: input.Location, ClearLocation: input.ClearLocation, Description: input.Description, Copyright: input.Copyright, Rating: input.Rating, Favorite: input.Favorite, UserMetadata: input.UserMetadata, Revision: input.Revision})
+		return nil, photo, err
 	})
 }
 
@@ -125,6 +189,29 @@ func addMediaCatalogTools(server *mcp.Server, store catalog.MediaStore) {
 		}
 		items, err := store.SimilarMedia(ctx, mediaType, strings.TrimSpace(input.AssetID), modality, bounded(input.Limit, 6, 1, 24))
 		return nil, items, err
+	})
+	additive := false
+	mcp.AddTool(server, &mcp.Tool{Name: "update_media_metadata", Title: "Update video or audio metadata", Description: "Update photographer-controlled media fields, tags, or a corrected transcript without changing files, hashes, vectors, or processing state.", Annotations: &mcp.ToolAnnotations{Title: "Update media metadata", ReadOnlyHint: false, IdempotentHint: false, DestructiveHint: &additive, OpenWorldHint: &closedWorld}}, func(ctx context.Context, _ *mcp.CallToolRequest, input UpdateMediaInput) (*mcp.CallToolResult, catalog.MediaAsset, error) {
+		if !input.Confirmed {
+			return nil, catalog.MediaAsset{}, errors.New("confirmed must be true after the user approves the edit")
+		}
+		if input.Revision == nil {
+			return nil, catalog.MediaAsset{}, errors.New("revision is required; call get_media before editing")
+		}
+		mediaType, err := validMediaType(input.MediaType)
+		if err != nil {
+			return nil, catalog.MediaAsset{}, err
+		}
+		var recordedAt *time.Time
+		if input.RecordedAt != nil {
+			parsed, parseErr := time.Parse(time.RFC3339, *input.RecordedAt)
+			if parseErr != nil {
+				return nil, catalog.MediaAsset{}, errors.New("recorded_at must be RFC3339")
+			}
+			recordedAt = &parsed
+		}
+		asset, err := store.UpdateMedia(ctx, mediaType, strings.TrimSpace(input.AssetID), catalog.MediaUpdate{Title: input.Title, Project: input.Project, RecordedAt: recordedAt, Tags: input.Tags, Description: input.Description, Copyright: input.Copyright, Rating: input.Rating, Favorite: input.Favorite, Transcript: input.Transcript, UserMetadata: input.UserMetadata, Revision: input.Revision})
+		return nil, asset, err
 	})
 }
 

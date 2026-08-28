@@ -98,6 +98,11 @@ function bindEvents() {
   $("#batch-close").addEventListener("click", () => $("#batch-dialog").close());
   $("#batch-form").addEventListener("submit", submitBatch);
   $("#batch-cancel").addEventListener("click", cancelBatch);
+	$("#photo-edit-open").addEventListener("click", openPhotoEditor);
+	$("#media-edit-open").addEventListener("click", openMediaEditor);
+	$("#photo-edit-form").addEventListener("submit", savePhotoEdit);
+	$("#media-edit-form").addEventListener("submit", saveMediaEdit);
+	$$('[data-edit-cancel]').forEach((button) => button.addEventListener("click", () => closeEditor(button.dataset.editCancel)));
   window.addEventListener("apofocus:localechange", refreshLocalizedUI);
 }
 
@@ -269,7 +274,7 @@ function renderPhotos() {
   grid.hidden = state.photos.length === 0;
   grid.innerHTML = state.photos.map((photo) => `
     <button class="photo-card ${photo.aspectRatio === "portrait" ? "portrait" : ""} ${photo.availabilityStatus && photo.availabilityStatus !== "available" && photo.availabilityStatus !== "unknown" ? "unavailable" : ""}" data-photo-id="${escapeAttr(photo.id)}" style="background:${escapeAttr(photo.dominantColor)}" aria-label="${escapeAttr(mediaText("photos", "view", { title: photo.title }))}">
-      <img src="${escapeAttr(photo.thumbnailUrl)}" alt="" loading="lazy" decoding="async">
+	  ${photo.thumbnailUrl || photo.imageUrl ? `<img src="${escapeAttr(photo.thumbnailUrl || photo.imageUrl)}" alt="" loading="lazy" decoding="async">` : `<span class="catalog-placeholder">PHOTO</span>`}
       <span class="card-badge">${escapeHTML(availabilityLabel(photo.availabilityStatus) || photo.fileType)}</span>
       <span class="card-copy"><h3>${escapeHTML(photo.title)}</h3><p>${escapeHTML(photo.project)} · ${photo.year}</p></span>
     </button>`).join("");
@@ -288,7 +293,7 @@ function mediaPreview(asset, mediaType) {
   if (mediaType === "audios") {
     return `<span class="audio-artwork" aria-hidden="true"><strong>♪</strong><small>${escapeHTML(asset.codec || "AUDIO")}</small></span>`;
   }
-  return `<img src="${escapeAttr(asset.thumbnailUrl)}" alt="" loading="lazy" decoding="async">`;
+  return asset.thumbnailUrl ? `<img src="${escapeAttr(asset.thumbnailUrl)}" alt="" loading="lazy" decoding="async">` : `<span class="catalog-placeholder">VIDEO</span>`;
 }
 
 function renderMediaAssets() {
@@ -427,6 +432,7 @@ function openDetail(id) {
   const photo = state.photos.find((item) => item.id === id);
   if (!photo) return;
   state.selected = photo;
+	closeEditor("photo");
   $("#detail-image").src = photo.availabilityStatus === "available" || photo.availabilityStatus === "unknown" ? photo.imageUrl : photo.thumbnailUrl;
   $("#detail-image").alt = photo.title;
   $("#detail-project").textContent = photo.project;
@@ -487,6 +493,7 @@ async function openMediaDetail(id) {
 }
 
 function renderMediaDetail(asset, mediaType, { loadPlayer = false } = {}) {
+	closeEditor("media");
   $("#media-detail-project").textContent = asset.project;
   $("#media-detail-title").textContent = asset.title;
   $("#media-detail-date").textContent = formatDate(asset.recordedAt);
@@ -516,6 +523,60 @@ function renderMediaDetail(asset, mediaType, { loadPlayer = false } = {}) {
   $("#media-similar-visual").hidden = mediaType !== "videos";
   $("#media-similar-audio strong").textContent = t(mediaType === "videos" ? "similar.audioVideoAction" : "similar.audioAudioAction");
 }
+
+function openPhotoEditor() {
+	const photo = state.selected; if (!photo) return;
+	const form = $("#photo-edit-form");
+	form.hidden = false; $("#photo-edit-open").hidden = true;
+	setFormValue(form,"title",photo.title); setFormValue(form,"project",photo.project);
+	setFormValue(form,"takenAt",localDateTime(photo.takenAt)); setFormValue(form,"tags",(photo.tags||[]).join(", "));
+	for (const name of ["camera","lens","aperture","shutterSpeed","iso","focalLength","description","copyright","rating"]) setFormValue(form,name,photo[name] ?? "");
+	setFormValue(form,"locationName",photo.location?.name||""); setFormValue(form,"latitude",photo.location?.latitude??""); setFormValue(form,"longitude",photo.location?.longitude??"");
+	form.elements.favorite.checked=Boolean(photo.favorite); form.elements.clearLocation.checked=false;
+	setFormValue(form,"userMetadata",JSON.stringify(photo.userMetadata||{},null,2));
+}
+
+function openMediaEditor() {
+	const asset=state.selectedMedia; if(!asset)return;
+	const form=$("#media-edit-form"); form.hidden=false; $("#media-edit-open").hidden=true;
+	for(const name of ["title","project","description","copyright","rating","transcript"]) setFormValue(form,name,asset[name]??"");
+	setFormValue(form,"recordedAt",localDateTime(asset.recordedAt)); setFormValue(form,"tags",(asset.tags||[]).join(", "));
+	form.elements.favorite.checked=Boolean(asset.favorite); setFormValue(form,"userMetadata",JSON.stringify(asset.userMetadata||{},null,2));
+}
+
+function closeEditor(kind) {
+	const form=$(`#${kind}-edit-form`),button=$(`#${kind}-edit-open`); if(form)form.hidden=true;if(button)button.hidden=false;
+}
+
+async function savePhotoEdit(event) {
+	event.preventDefault(); const form=event.currentTarget, photo=state.selected; if(!photo)return;
+	try {
+		const location=coordinatesFrom(form), userMetadata=parseMetadata(form.elements.userMetadata.value);
+		const payload={title:valueOf(form,"title"),project:valueOf(form,"project"),takenAt:isoDate(form,"takenAt"),tags:tagsOf(form),camera:valueOf(form,"camera"),lens:valueOf(form,"lens"),aperture:valueOf(form,"aperture"),shutterSpeed:valueOf(form,"shutterSpeed"),iso:Number(valueOf(form,"iso")||0),focalLength:valueOf(form,"focalLength"),description:valueOf(form,"description"),copyright:valueOf(form,"copyright"),rating:Number(valueOf(form,"rating")||0),favorite:form.elements.favorite.checked,userMetadata,revision:photo.revision||0,clearLocation:form.elements.clearLocation.checked};
+		if(location)payload.location=location;
+		const updated=await patchAsset(`/api/v1/photos/${encodeURIComponent(photo.id)}`,payload);
+		state.photos=state.photos.map((item)=>item.id===updated.id?updated:item); state.selected=updated; renderPhotos(); openDetail(updated.id); await loadFacets();
+	} catch(error){ showEditError(form,error); }
+}
+
+async function saveMediaEdit(event) {
+	event.preventDefault(); const form=event.currentTarget,asset=state.selectedMedia;if(!asset)return;
+	try {
+		const payload={title:valueOf(form,"title"),project:valueOf(form,"project"),recordedAt:isoDate(form,"recordedAt"),tags:tagsOf(form),description:valueOf(form,"description"),copyright:valueOf(form,"copyright"),rating:Number(valueOf(form,"rating")||0),favorite:form.elements.favorite.checked,transcript:valueOf(form,"transcript"),userMetadata:parseMetadata(form.elements.userMetadata.value),revision:asset.revision||0};
+		const updated=await patchAsset(`/api/v1/${state.mediaType}/${encodeURIComponent(asset.id)}`,payload);
+		state.selectedMedia=updated; state.mediaItems=state.mediaItems.map((item)=>item.id===updated.id?{...item,...updated}:item); renderMediaAssets(); renderMediaDetail(updated,state.mediaType,{loadPlayer:false}); await loadFacets();
+	} catch(error){showEditError(form,error);}
+}
+
+async function patchAsset(url,payload){const response=await fetch(url,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});const body=await response.json();if(!response.ok)throw new Error(body.error||t("edit.failed"));return body;}
+function setFormValue(form,name,value){if(form.elements[name])form.elements[name].value=value??"";}
+function valueOf(form,name){return String(form.elements[name]?.value||"").trim();}
+function tagsOf(form){return valueOf(form,"tags").split(",").map((value)=>value.trim()).filter(Boolean);}
+function isoDate(form,name){const value=valueOf(form,name);return value?new Date(value).toISOString():undefined;}
+function localDateTime(value){if(!value)return"";const date=new Date(value),offset=date.getTimezoneOffset()*60000;return new Date(date-offset).toISOString().slice(0,16);}
+function coordinatesFrom(form){const lat=valueOf(form,"latitude"),lng=valueOf(form,"longitude");if(lat===""||lng==="")return null;return{name:valueOf(form,"locationName"),latitude:Number(lat),longitude:Number(lng)};}
+function parseMetadata(value){try{return JSON.parse(value||"{}");}catch{throw new Error(t("edit.invalidJSON"));}}
+function showEditError(form,error){const target=$("[data-edit-message]",form);target.textContent=error.message||t("edit.failed");}
 
 async function showSimilarMedia(modality) {
   const asset = state.selectedMedia;

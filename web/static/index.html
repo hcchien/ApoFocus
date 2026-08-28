@@ -115,6 +115,25 @@
       <div class="detail-visual"><img id="detail-image" alt=""><div class="detail-nav"><button id="detail-prev" aria-label="上一張" data-i18n-aria-label="detail.previous">←</button><span id="detail-position"></span><button id="detail-next" aria-label="下一張" data-i18n-aria-label="detail.next">→</button></div></div>
       <aside class="detail-panel">
         <p class="eyebrow" id="detail-project"></p><h2 id="detail-title"></h2><p class="detail-date" id="detail-date"></p>
+        <button class="edit-open-button" id="photo-edit-open" type="button" data-i18n="edit.open">編輯資料</button>
+        <form class="metadata-edit-form" id="photo-edit-form" hidden>
+          <div class="edit-form-head"><strong data-i18n="edit.photoTitle">編輯照片資料</strong><button type="button" data-edit-cancel="photo" data-i18n="common.cancel">取消</button></div>
+          <label><span data-i18n="edit.title">標題</span><input name="title" required maxlength="240"></label>
+          <label><span data-i18n="edit.project">專題</span><input name="project" maxlength="120"></label>
+          <label><span data-i18n="edit.date">拍攝時間</span><input name="takenAt" type="datetime-local"></label>
+          <label class="wide"><span data-i18n="edit.tags">Tags（逗號分隔）</span><input name="tags"></label>
+          <label><span data-i18n="filters.camera">相機</span><input name="camera"></label><label><span data-i18n="filters.lens">鏡頭</span><input name="lens"></label>
+          <label><span data-i18n="field.aperture">光圈</span><input name="aperture"></label><label><span data-i18n="field.shutter">快門</span><input name="shutterSpeed"></label>
+          <label><span>ISO</span><input name="iso" type="number" min="0"></label><label><span data-i18n="field.focalLength">焦距</span><input name="focalLength"></label>
+          <label class="wide"><span data-i18n="edit.description">說明</span><textarea name="description" rows="3"></textarea></label>
+          <label class="wide"><span data-i18n="edit.copyright">Copyright</span><input name="copyright"></label>
+          <label><span data-i18n="edit.locationName">地點名稱</span><input name="locationName"></label><label><span data-i18n="edit.rating">評分</span><select name="rating"><option value="0">—</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+          <label><span>Latitude</span><input name="latitude" type="number" step="any" min="-90" max="90"></label><label><span>Longitude</span><input name="longitude" type="number" step="any" min="-180" max="180"></label>
+          <label class="check-row"><input name="favorite" type="checkbox"><span class="fake-check"><svg viewBox="0 0 16 16"><path d="m3 8 3 3 7-7"/></svg></span><span data-i18n="edit.favorite">加入精選</span></label>
+          <label class="check-row"><input name="clearLocation" type="checkbox"><span class="fake-check"><svg viewBox="0 0 16 16"><path d="m3 8 3 3 7-7"/></svg></span><span data-i18n="edit.clearLocation">清除 GeoTag</span></label>
+          <label class="wide"><span data-i18n="edit.customMetadata">自訂 Metadata（JSON）</span><textarea name="userMetadata" rows="3">{}</textarea></label>
+          <p class="edit-message" data-edit-message></p><button class="batch-submit wide" type="submit" data-i18n="edit.save">儲存修改</button>
+        </form>
         <button class="similar-button" id="similar-button"><svg viewBox="0 0 24 24"><circle cx="9" cy="9" r="5"/><circle cx="16" cy="15" r="5"/><path d="m4 20 3.5-3.5"/></svg><span><strong data-i18n="similar.photoAction">尋找視覺相似照片</strong><small data-i18n="similar.photoHint">使用 pgvector 計算影像距離</small></span><i>→</i></button>
         <div class="detail-section"><h3 data-i18n="detail.photoInfo">拍攝資訊</h3><dl id="detail-exif"></dl></div>
         <div class="detail-section" id="detail-location-section"><h3 data-i18n="detail.location">地點</h3><div class="location-card"><svg viewBox="0 0 24 24"><path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg><span><strong id="detail-location"></strong><small id="detail-coordinates"></small></span></div></div>
@@ -138,6 +157,18 @@
       </div>
       <aside class="detail-panel">
         <p class="eyebrow" id="media-detail-project"></p><h2 id="media-detail-title"></h2><p class="detail-date" id="media-detail-date"></p>
+        <button class="edit-open-button" id="media-edit-open" type="button" data-i18n="edit.open">編輯資料</button>
+        <form class="metadata-edit-form" id="media-edit-form" hidden>
+          <div class="edit-form-head"><strong data-i18n="edit.mediaTitle">編輯影音資料</strong><button type="button" data-edit-cancel="media" data-i18n="common.cancel">取消</button></div>
+          <label><span data-i18n="edit.title">標題</span><input name="title" required maxlength="240"></label><label><span data-i18n="edit.project">專題</span><input name="project" maxlength="120"></label>
+          <label><span data-i18n="edit.date">錄製時間</span><input name="recordedAt" type="datetime-local"></label><label><span data-i18n="edit.rating">評分</span><select name="rating"><option value="0">—</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+          <label class="wide"><span data-i18n="edit.tags">Tags（逗號分隔）</span><input name="tags"></label>
+          <label class="wide"><span data-i18n="edit.description">說明</span><textarea name="description" rows="3"></textarea></label><label class="wide"><span data-i18n="edit.copyright">Copyright</span><input name="copyright"></label>
+          <label class="wide"><span data-i18n="detail.transcript">逐字稿</span><textarea name="transcript" rows="6"></textarea></label>
+          <label class="check-row"><input name="favorite" type="checkbox"><span class="fake-check"><svg viewBox="0 0 16 16"><path d="m3 8 3 3 7-7"/></svg></span><span data-i18n="edit.favorite">加入精選</span></label>
+          <label class="wide"><span data-i18n="edit.customMetadata">自訂 Metadata（JSON）</span><textarea name="userMetadata" rows="3">{}</textarea></label>
+          <p class="edit-message" data-edit-message></p><button class="batch-submit wide" type="submit" data-i18n="edit.save">儲存修改</button>
+        </form>
         <div class="media-similar-actions">
           <button class="similar-button compact" id="media-similar-visual"><svg viewBox="0 0 24 24"><circle cx="9" cy="9" r="5"/><circle cx="16" cy="15" r="5"/><path d="m4 20 3.5-3.5"/></svg><span><strong data-i18n="similar.visualVideoAction">尋找畫面相似影片</strong><small data-i18n="similar.visualHint">OpenCLIP keyframe 距離</small></span><i>→</i></button>
           <button class="similar-button compact" id="media-similar-audio"><svg viewBox="0 0 24 24"><path d="M5 9v6M9 6v12M13 4v16M17 7v10M21 10v4"/></svg><span><strong data-i18n="similar.audioContentAction">尋找聲音相似內容</strong><small data-i18n="similar.audioHint">CLAP 音訊片段距離</small></span><i>→</i></button>

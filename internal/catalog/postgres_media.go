@@ -15,7 +15,10 @@ SELECT m.id::text, m.media_type, m.title, m.capture_year, COALESCE(pr.name, ''),
        COALESCE((SELECT json_agg(t.name ORDER BY t.name) FROM media_asset_tags mat JOIN tags t ON t.id=mat.tag_id WHERE mat.media_asset_id=m.id), '[]')::text,
        m.path, COALESCE(m.thumbnail_path, ''), m.media_url, m.thumbnail_url, m.transcript,
        COALESCE(m.metadata, '{}'::jsonb)::text,
-       COALESCE(m.availability_status, 'unknown'), COALESCE(m.thumbnail_status, 'unknown')
+       COALESCE(m.availability_status, 'unknown'), COALESCE(m.thumbnail_status, 'unknown'),
+       COALESCE(m.description,''),COALESCE(m.copyright,''),COALESCE(m.rating,0),COALESCE(m.favorite,false),
+       COALESCE(m.user_metadata,'{}'::jsonb)::text,COALESCE(m.revision,1),COALESCE(m.content_hash_status,'completed'),
+       COALESCE(m.ai_status,'completed'),COALESCE(m.deep_index_status,'completed')
 FROM media_assets m
 LEFT JOIN projects pr ON pr.id=m.project_id`
 
@@ -202,17 +205,21 @@ func buildMediaWhere(filter MediaFilter) (string, []any) {
 
 func scanMedia(row scanner) (MediaAsset, error) {
 	var asset MediaAsset
-	var tagsJSON, metadataJSON string
+	var tagsJSON, metadataJSON, userMetadataJSON string
 	if err := row.Scan(&asset.ID, &asset.MediaType, &asset.Title, &asset.Year, &asset.Project, &asset.RecordedAt,
 		&asset.DurationMS, &asset.MimeType, &asset.Codec, &asset.Dimensions, &asset.SampleRate, &asset.Channels,
 		&tagsJSON, &asset.Path, &asset.ThumbnailPath, &asset.MediaURL, &asset.ThumbnailURL, &asset.Transcript, &metadataJSON,
-		&asset.Availability, &asset.ThumbnailState); err != nil {
+		&asset.Availability, &asset.ThumbnailState, &asset.Description, &asset.Copyright, &asset.Rating, &asset.Favorite,
+		&userMetadataJSON, &asset.Revision, &asset.HashStatus, &asset.AIStatus, &asset.DeepIndexState); err != nil {
 		return MediaAsset{}, err
 	}
 	if err := json.Unmarshal([]byte(tagsJSON), &asset.Tags); err != nil {
 		return MediaAsset{}, err
 	}
 	if err := json.Unmarshal([]byte(metadataJSON), &asset.Metadata); err != nil {
+		return MediaAsset{}, err
+	}
+	if err := json.Unmarshal([]byte(userMetadataJSON), &asset.UserMetadata); err != nil {
 		return MediaAsset{}, err
 	}
 	return asset, nil

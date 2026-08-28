@@ -28,6 +28,29 @@ type MediaAsset struct {
 	Path           string         `json:"-"`
 	ThumbnailPath  string         `json:"-"`
 	Segments       []MediaSegment `json:"segments,omitempty"`
+	Description    string         `json:"description"`
+	Copyright      string         `json:"copyright"`
+	Rating         int            `json:"rating"`
+	Favorite       bool           `json:"favorite"`
+	UserMetadata   map[string]any `json:"userMetadata,omitempty"`
+	Revision       int64          `json:"revision"`
+	HashStatus     string         `json:"hashStatus"`
+	AIStatus       string         `json:"aiStatus"`
+	DeepIndexState string         `json:"deepIndexStatus"`
+}
+
+type MediaUpdate struct {
+	Title        *string         `json:"title,omitempty"`
+	Project      *string         `json:"project,omitempty"`
+	RecordedAt   *time.Time      `json:"recordedAt,omitempty"`
+	Tags         *[]string       `json:"tags,omitempty"`
+	Description  *string         `json:"description,omitempty"`
+	Copyright    *string         `json:"copyright,omitempty"`
+	Rating       *int            `json:"rating,omitempty"`
+	Favorite     *bool           `json:"favorite,omitempty"`
+	Transcript   *string         `json:"transcript,omitempty"`
+	UserMetadata *map[string]any `json:"userMetadata,omitempty"`
+	Revision     *int64          `json:"revision"`
 }
 
 type MediaSegment struct {
@@ -81,4 +104,5 @@ type MediaStore interface {
 	GetMedia(context.Context, string, string) (MediaAsset, error)
 	MediaFacets(context.Context, string) (MediaFacets, error)
 	SimilarMedia(context.Context, string, string, string, int) ([]SimilarMedia, error)
+	UpdateMedia(context.Context, string, string, MediaUpdate) (MediaAsset, error)
 }

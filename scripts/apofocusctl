@@ -6,7 +6,7 @@ STATE_DIR="${APOFOCUS_STATE_DIR:-$HOME/Library/Application Support/ApoFocus}"
 CONFIG_FILE="$STATE_DIR/apofocus.env"
 LAUNCH_AGENT_DIR="$HOME/Library/LaunchAgents"
 DOMAIN="gui/$(id -u)"
-SERVICE_LABELS=(com.apofocus.postgres com.apofocus.embedding com.apofocus.web)
+SERVICE_LABELS=(com.apofocus.postgres com.apofocus.embedding com.apofocus.worker com.apofocus.web)
 SCHEDULED_LABELS=(com.apofocus.backup com.apofocus.backup-verify)
 LABELS=("${SERVICE_LABELS[@]}" "${SCHEDULED_LABELS[@]}")
 

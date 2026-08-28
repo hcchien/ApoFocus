@@ -45,7 +45,7 @@ type BatchDiagnosisOutput struct {
 }
 
 type RepairServiceInput struct {
-	Service   string `json:"service" jsonschema:"managed service to restart: postgres, web, or embedding"`
+	Service   string `json:"service" jsonschema:"managed service to restart: postgres, web, embedding, or worker"`
 	Confirmed bool   `json:"confirmed" jsonschema:"must be true after get_system_health or diagnose_batch_job shows that a restart is appropriate"`
 	Locale    string `json:"locale,omitempty" jsonschema:"zh-TW, en, or de for the human-readable summary"`
 }
@@ -79,14 +79,14 @@ func addMaintenanceTools(server *mcp.Server, operations maintenance.Checker, job
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "repair_managed_service", Title: "Restart an ApoFocus managed service",
-		Description: "Restart only the allowlisted com.apofocus.postgres, com.apofocus.web or com.apofocus.embedding macOS LaunchAgent, then wait for its local health check. confirmed must be true after diagnosis. This tool cannot execute arbitrary shell commands and does not resume terminal jobs automatically.",
+		Description: "Restart only the allowlisted com.apofocus.postgres, com.apofocus.web, com.apofocus.embedding or com.apofocus.worker macOS LaunchAgent. Endpoint services must pass their health check; for the init worker, verify its persisted heartbeat with get_init_status. confirmed must be true after diagnosis. This tool cannot execute arbitrary shell commands and does not resume terminal jobs automatically.",
 		Annotations: &mcp.ToolAnnotations{Title: "Restart an ApoFocus managed service", ReadOnlyHint: false, IdempotentHint: true, DestructiveHint: &nonDestructive, OpenWorldHint: &closedWorld},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, input RepairServiceInput) (*mcp.CallToolResult, RepairServiceOutput, error) {
 		if !input.Confirmed {
 			return nil, RepairServiceOutput{}, errors.New("confirmed must be true after checking system health or diagnosing the batch job")
 		}
 		result, err := operations.Repair(ctx, input.Service)
-		summary := localized(normalizedLocale(input.Locale), "服務已重新啟動並通過健康檢查。", "The service was restarted and passed its health check.", "Der Dienst wurde neu gestartet und hat die Zustandsprüfung bestanden.")
+		summary := localized(normalizedLocale(input.Locale), "服務已重新啟動；若是 Init worker，請再以 get_init_status 確認 heartbeat。", "The service was restarted; for the init worker, verify its heartbeat with get_init_status.", "Der Dienst wurde neu gestartet; beim Init-Worker den Heartbeat mit get_init_status prüfen.")
 		if err != nil {
 			summary = localized(normalizedLocale(input.Locale), "服務修復未完成，請查看回傳錯誤。", "Service repair did not complete; inspect the returned error.", "Die Dienstreparatur wurde nicht abgeschlossen; bitte den zurückgegebenen Fehler prüfen.")
 		}
