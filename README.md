@@ -167,6 +167,12 @@ make run
 | `metadata jsonb` | 未提升為常用欄位的 EXIF、IPTC、XMP 等延伸資訊 |
 | `embedding vector(512)` | 經 L2 normalization 的 OpenCLIP 影像向量 |
 
+Project 與 Story 透過 `project_stories` 建立多對多關係；兩者分別透過
+`project_photos` / `project_media_assets` 與 `story_photos` /
+`story_media_assets` 關聯照片及影音。`video_audio_relations` 保存 Video 與
+Audio 的相關素材關係，並在資料庫層驗證兩端媒體型別；`photo_derivations`
+則保存 RAW、TIFF、JPEG、裁切或其他衍生照片之間有方向的 parent-child 關係。
+
 `revision` 提供 optimistic locking；編輯 UI、HTTP API 與 MCP 必須帶回讀取時的 revision，避免人工與 worker 同時寫入時靜默覆蓋。人工 Tags 會設 `tags_user_edited`，影音逐字稿會設 `transcript_user_edited`；後續 AI 只補自己的欄位，不會覆蓋攝影師已確認的內容。
 
 ## 大型媒體庫初始化
@@ -337,6 +343,8 @@ Batch API：
 - `GET /api/v1/batch-jobs/{id}/events` — SSE
 - `POST /api/v1/batch-jobs/{id}/cancel`
 
+媒體列表支援先搜尋／篩選，再逐筆勾選或一次選取前 500 筆搜尋結果。批次關聯面板可對 Photo／Video／Audio 新增、移除或完整取代 Project／Story；Photo 另可把所有勾選項目設為指定照片的 parents 或 children。`POST /api/v1/relations/bulk` 會在同一個 PostgreSQL transaction 中完成整批修改，任一筆無效時全部 rollback。
+
 ## 檔案搬移與 filesystem events
 
 設定 `DATABASE_URL` 與 `PHOTO_LIBRARY_ROOT` 後，Web app 會啟動 storage watcher supervisor。它除了 managed library，也會每 30 秒發現 Init 後新增的 reference roots，為每個已掛載 root 啟動一個 watcher；原檔與位於另一個磁碟的縮圖分別追蹤。
@@ -350,13 +358,14 @@ SHA-256 仍用於內容去重；它不能在沒有 index 或 filesystem event �
 
 ## MCP：讓 LLM 操作 ApoFocus
 
-MCP server 使用官方 Go SDK 與 stdio transport；啟用備份與 Init 後完整模式共提供 37 個 tools：
+MCP server 使用官方 Go SDK 與 stdio transport；啟用備份與 Init 後完整模式共提供 44 個 tools：
 
 | 類別 | Tools | 行為 |
 |---|---|---|
 | 照片匯入 | `get_photo_import_policy`、`inspect_photo`、`import_photo` | allowlist、EXIF／GeoTag 預覽、folder、OpenCLIP Tags／向量、縮圖及 transaction 寫入 |
 | 照片搜尋／編輯 | `search_photos`、`get_photo`、`find_similar_photos`、`update_photo_metadata` | 年份、專題、Tags、EXIF、GeoTag、全文／向量搜尋及 revision-protected 人工修改 |
 | 影片／音訊 | `inspect_media`、`import_media`、`search_media`、`get_media`、`find_similar_media`、`update_media_metadata` | metadata、逐字稿、OpenCLIP／CLAP vectors、搜尋、相似度與人工修正 |
+| Project／Story 關聯 | `list_projects_and_stories`、`create_project`、`update_project`、`create_story`、`update_story`、`update_project_story_relationships`、`bulk_update_asset_relationships` | 建立與修改 description、Project↔Story 多對多，以及一次新增／移除／取代最多 500 筆媒體關聯；寫入皆要求 `confirmed` |
 | 虛擬資料夾 | `browse_folders`、`create_collection`、`add_photos_to_collection`、`get_collection_photos` | facets、Finder 式 browsing、manual／smart collections；`browse_folders.locale` 支援 `zh-TW`、`en`、`de` |
 | Batch | `create_batch_job`、`list_batch_jobs`、`get_batch_job`、`wait_batch_job`、`list_batch_items`、`cancel_batch_job`、`resume_batch_job` | 建立與找回持久化工作、短輪詢監控、逐檔錯誤、取消與安全恢復；狀態 label 支援三種語言 |
 | Init | `create_init_run`、`get_init_status`、`list_init_runs`、`list_init_items`、`pause_init_run`、`resume_init_run`、`cancel_init_run` | reference 大型初始化、phase/ETA、heartbeat、逐檔診斷、checkpoint pause 與中斷恢復 |
@@ -440,13 +449,19 @@ make build-mcp         # 產生 bin/apofocus-mcp，交由 LLM client 啟動
 
 - `GET /api/v1/photos` — 支援 `q`、`year`、`project`、重複的 `tag`、`camera`、`lens`、`min_iso`、`max_iso`、`has_location`
 - `GET /api/v1/photos/{id}` — 照片詳情
+- `PATCH /api/v1/photos/{id}` — metadata、Project／Story 多對多及 parent／child 衍生照片關係；需帶目前 `revision`
 - `GET /api/v1/photos/{id}/similar?limit=6` — pgvector cosine similarity
 - `GET /api/v1/facets` — 各篩選條件與數量
 - `GET /api/v1/videos`、`GET /api/v1/audios` — 支援 `q`、`year`、`project`、`tag`、`codec`、`min_duration_ms`、`max_duration_ms`、`has_transcript`
 - `GET /api/v1/videos/{id}`、`GET /api/v1/audios/{id}` — player、逐字稿與索引片段資料
+- `PATCH /api/v1/videos/{id}`、`PATCH /api/v1/audios/{id}` — metadata、Project／Story 與 Video↔Audio 相關素材；需帶目前 `revision`
 - `GET /api/v1/videos/{id}/similar?modality=visual|audio` — 影片可依 keyframe 或聲音距離搜尋
 - `GET /api/v1/audios/{id}/similar?modality=audio` — CLAP 聲音距離搜尋
 - `GET /api/v1/videos/facets`、`GET /api/v1/audios/facets` — 媒體 facets
+- `GET /api/v1/relations/catalog` — Project、Story 及 Project↔Story 關聯選項
+- `POST /api/v1/projects`、`PATCH /api/v1/projects/{id}` — 新增 Project 或修改 description
+- `POST /api/v1/stories`、`PATCH /api/v1/stories/{id}` — 新增 Story 或修改 description
+- `PUT /api/v1/projects/{id}/stories` — 以完整 Story ID 清單取代 Project↔Story 關聯
 - `GET /healthz` — Go service health check
 
 ## 驗證

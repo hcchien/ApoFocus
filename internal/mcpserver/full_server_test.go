@@ -44,6 +44,30 @@ func (fakeMediaImporter) Import(context.Context, mediaingest.ImportRequest) (med
 	return mediaingest.ImportResult{}, nil
 }
 
+type fakeRelationStore struct{}
+
+func (fakeRelationStore) ListRelationCatalog(context.Context) (catalog.RelationCatalog, error) {
+	return catalog.RelationCatalog{Projects: []catalog.Project{}, Stories: []catalog.Story{}}, nil
+}
+func (fakeRelationStore) CreateProject(_ context.Context, description string) (catalog.Project, error) {
+	return catalog.Project{ID: "project", Description: description}, nil
+}
+func (fakeRelationStore) UpdateProject(_ context.Context, id, description string) (catalog.Project, error) {
+	return catalog.Project{ID: id, Description: description}, nil
+}
+func (fakeRelationStore) CreateStory(_ context.Context, description string) (catalog.Story, error) {
+	return catalog.Story{ID: "story", Description: description}, nil
+}
+func (fakeRelationStore) UpdateStory(_ context.Context, id, description string) (catalog.Story, error) {
+	return catalog.Story{ID: id, Description: description}, nil
+}
+func (fakeRelationStore) ReplaceProjectStories(_ context.Context, _ string, _ []string) ([]catalog.Story, error) {
+	return []catalog.Story{}, nil
+}
+func (fakeRelationStore) BulkUpdateRelations(_ context.Context, input catalog.BulkRelationUpdate) (catalog.BulkRelationResult, error) {
+	return catalog.BulkRelationResult{MediaType: input.MediaType, Operation: input.Operation, AssetCount: len(input.AssetIDs)}, nil
+}
+
 type fakeFolders struct{}
 
 func (fakeFolders) List(context.Context) ([]folders.Collection, error) { return nil, nil }
@@ -111,7 +135,7 @@ func TestFullServerAdvertisesCompleteToolset(t *testing.T) {
 	initJobs := &fakeInitJobs{run: initjob.Run{ID: "init", SourceRoot: inbox, Status: "cataloging", DiscoveredCount: 10, CatalogedCount: 4, CreatedAt: now, HeartbeatAt: &now}}
 	health := maintenance.HealthReport{Status: maintenance.StatusHealthy, Database: maintenance.ComponentHealth{Status: maintenance.StatusHealthy}, Web: maintenance.ComponentHealth{Status: maintenance.StatusHealthy}, Embedding: maintenance.ComponentHealth{Status: maintenance.StatusHealthy}, Worker: maintenance.WorkerHealth{Status: maintenance.StatusHealthy}}
 	server := NewWithOptions(Options{
-		PhotoImporter: manager, MediaImporter: fakeMediaImporter{}, Photos: catalog.NewMemoryStore(), Media: fakeMediaStore{},
+		PhotoImporter: manager, MediaImporter: fakeMediaImporter{}, Photos: catalog.NewMemoryStore(), Media: fakeMediaStore{}, Relations: fakeRelationStore{},
 		Folders: fakeFolders{}, BatchJobs: jobs, InitJobs: initJobs, Maintenance: fakeMaintenance{report: health},
 		Backup:      fakeBackup{report: backup.HealthReport{Status: backup.StatusHealthy, Configured: true, RootAvailable: true}},
 		ImportRoots: []string{inbox}, LibraryRoot: library,
@@ -133,7 +157,7 @@ func TestFullServerAdvertisesCompleteToolset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wanted := []string{"get_photo_import_policy", "inspect_photo", "import_photo", "search_photos", "get_photo", "find_similar_photos", "update_photo_metadata", "search_media", "get_media", "find_similar_media", "update_media_metadata", "inspect_media", "import_media", "browse_folders", "create_collection", "add_photos_to_collection", "get_collection_photos", "create_batch_job", "get_batch_job", "list_batch_jobs", "wait_batch_job", "list_batch_items", "cancel_batch_job", "resume_batch_job", "create_init_run", "get_init_status", "list_init_runs", "list_init_items", "pause_init_run", "resume_init_run", "cancel_init_run", "get_system_health", "diagnose_batch_job", "repair_managed_service", "get_backup_health", "run_backup", "verify_backup"}
+	wanted := []string{"get_photo_import_policy", "inspect_photo", "import_photo", "search_photos", "get_photo", "find_similar_photos", "update_photo_metadata", "search_media", "get_media", "find_similar_media", "update_media_metadata", "list_projects_and_stories", "create_project", "update_project", "create_story", "update_story", "update_project_story_relationships", "bulk_update_asset_relationships", "inspect_media", "import_media", "browse_folders", "create_collection", "add_photos_to_collection", "get_collection_photos", "create_batch_job", "get_batch_job", "list_batch_jobs", "wait_batch_job", "list_batch_items", "cancel_batch_job", "resume_batch_job", "create_init_run", "get_init_status", "list_init_runs", "list_init_items", "pause_init_run", "resume_init_run", "cancel_init_run", "get_system_health", "diagnose_batch_job", "repair_managed_service", "get_backup_health", "run_backup", "verify_backup"}
 	seen := map[string]bool{}
 	for _, tool := range tools.Tools {
 		seen[tool.Name] = true
@@ -149,8 +173,20 @@ func TestFullServerAdvertisesCompleteToolset(t *testing.T) {
 			t.Errorf("missing tool %s", name)
 		}
 	}
+	result, err := clientSession.CallTool(ctx, &mcp.CallToolParams{Name: "list_projects_and_stories", Arguments: map[string]any{}})
+	if err != nil || result.IsError || result.StructuredContent == nil {
+		t.Fatalf("list_projects_and_stories failed: err=%v result=%+v", err, result)
+	}
+	result, err = clientSession.CallTool(ctx, &mcp.CallToolParams{Name: "update_project_story_relationships", Arguments: map[string]any{"project_id": "project", "story_ids": []any{"story"}, "confirmed": true}})
+	if err != nil || result.IsError {
+		t.Fatalf("update_project_story_relationships failed: err=%v result=%+v", err, result)
+	}
+	result, err = clientSession.CallTool(ctx, &mcp.CallToolParams{Name: "bulk_update_asset_relationships", Arguments: map[string]any{"media_type": "photo", "asset_ids": []any{"asset"}, "operation": "add", "apply_projects": true, "project_ids": []any{"project"}, "confirmed": true}})
+	if err != nil || result.IsError {
+		t.Fatalf("bulk_update_asset_relationships failed: err=%v result=%+v", err, result)
+	}
 
-	result, err := clientSession.CallTool(ctx, &mcp.CallToolParams{Name: "get_batch_job", Arguments: map[string]any{"job_id": "job", "locale": "de"}})
+	result, err = clientSession.CallTool(ctx, &mcp.CallToolParams{Name: "get_batch_job", Arguments: map[string]any{"job_id": "job", "locale": "de"}})
 	if err != nil {
 		t.Fatal(err)
 	}

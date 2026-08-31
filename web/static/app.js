@@ -26,6 +26,8 @@ const state = {
   batchJobID: null,
   batchJob: null,
   batchEvents: null,
+  relationCatalog: null,
+  bulkSelections: { photos: new Set(), videos: new Set(), audios: new Set() },
   filters: { q: "", year: "", project: "", tags: [], camera: "", lens: "", minISO: "", maxISO: "", location: false, codec: "", duration: "", transcript: false },
 };
 
@@ -35,6 +37,7 @@ const grid = $("#photo-grid");
 const dialog = $("#photo-dialog");
 const similarDialog = $("#similar-dialog");
 const mediaDialog = $("#media-dialog");
+const bulkRelationsDialog = $("#bulk-relations-dialog");
 
 document.addEventListener("DOMContentLoaded", init);
 
@@ -102,7 +105,16 @@ function bindEvents() {
 	$("#media-edit-open").addEventListener("click", openMediaEditor);
 	$("#photo-edit-form").addEventListener("submit", savePhotoEdit);
 	$("#media-edit-form").addEventListener("submit", saveMediaEdit);
+	$$('[data-create-relation-entity]').forEach((button) => button.addEventListener("click", () => createRelationEntity(button)));
 	$$('[data-edit-cancel]').forEach((button) => button.addEventListener("click", () => closeEditor(button.dataset.editCancel)));
+  $("#select-visible").addEventListener("change", toggleVisibleSelection);
+  $("#select-search-results").addEventListener("click", selectSearchResults);
+  $("#clear-selection").addEventListener("click", clearBulkSelection);
+  $("#open-bulk-relations").addEventListener("click", openBulkRelations);
+  $("#bulk-relations-close").addEventListener("click", () => bulkRelationsDialog.close());
+  $("#bulk-relations-form").addEventListener("submit", applyBulkRelations);
+  $("#bulk-relations-form").elements.operation.addEventListener("change", syncBulkRelationForm);
+  bulkRelationsDialog.addEventListener("click", (event) => { if (event.target === bulkRelationsDialog) bulkRelationsDialog.close(); });
   window.addEventListener("apofocus:localechange", refreshLocalizedUI);
 }
 
@@ -121,6 +133,7 @@ function refreshLocalizedUI() {
     if (state.selectedFolder) renderFolderPreview(state.selectedFolder);
   }
   if (state.batchJob) updateBatchProgress(state.batchJob);
+  renderBulkSelection();
 }
 
 async function loadFacets() {
@@ -144,17 +157,8 @@ async function loadPhotos() {
     return loadMediaAssets();
   }
   renderSkeletons();
-  const params = new URLSearchParams({ limit: "60" });
+  const params = currentListParams(60);
   const f = state.filters;
-  if (f.q) params.set("q", f.q);
-  if (f.year) params.set("year", f.year);
-  if (f.project) params.set("project", f.project);
-  f.tags.forEach((tag) => params.append("tag", tag));
-  if (f.camera) params.set("camera", f.camera);
-  if (f.lens) params.set("lens", f.lens);
-  if (f.minISO) params.set("min_iso", f.minISO);
-  if (f.maxISO) params.set("max_iso", f.maxISO);
-  if (f.location) params.set("has_location", "true");
   try {
     const response = await fetch(`/api/v1/photos?${params}`);
     if (!response.ok) throw new Error(t("media.loadError", { media: mediaText("photos", "label") }));
@@ -176,17 +180,7 @@ async function loadPhotos() {
 async function loadMediaAssets() {
   const mediaType = state.mediaType;
   renderSkeletons(true);
-  const params = new URLSearchParams({ limit: "60" });
-  const f = state.filters;
-  if (f.q) params.set("q", f.q);
-  if (f.year) params.set("year", f.year);
-  if (f.project) params.set("project", f.project);
-  f.tags.forEach((tag) => params.append("tag", tag));
-  if (f.codec) params.set("codec", f.codec);
-  if (f.duration === "short") params.set("max_duration_ms", "300000");
-  if (f.duration === "medium") { params.set("min_duration_ms", "300000"); params.set("max_duration_ms", "1800000"); }
-  if (f.duration === "long") params.set("min_duration_ms", "1800000");
-  if (f.transcript) params.set("has_transcript", "true");
+  const params = currentListParams(60);
   try {
     const response = await fetch(`/api/v1/${mediaType}?${params}`);
     if (!response.ok) throw new Error(t("media.loadError", { media: mediaText(mediaType, "label") }));
@@ -203,6 +197,29 @@ async function loadMediaAssets() {
     console.error(error);
     grid.innerHTML = renderLoadError(mediaType);
   }
+}
+
+function currentListParams(limit) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  const f = state.filters;
+  if (f.q) params.set("q", f.q);
+  if (f.year) params.set("year", f.year);
+  if (f.project) params.set("project", f.project);
+  f.tags.forEach((tag) => params.append("tag", tag));
+  if (state.mediaType === "photos") {
+    if (f.camera) params.set("camera", f.camera);
+    if (f.lens) params.set("lens", f.lens);
+    if (f.minISO) params.set("min_iso", f.minISO);
+    if (f.maxISO) params.set("max_iso", f.maxISO);
+    if (f.location) params.set("has_location", "true");
+  } else {
+    if (f.codec) params.set("codec", f.codec);
+    if (f.duration === "short") params.set("max_duration_ms", "300000");
+    if (f.duration === "medium") { params.set("min_duration_ms", "300000"); params.set("max_duration_ms", "1800000"); }
+    if (f.duration === "long") params.set("min_duration_ms", "1800000");
+    if (f.transcript) params.set("has_transcript", "true");
+  }
+  return params;
 }
 
 function renderFacets() {
@@ -272,13 +289,16 @@ function renderPhotos() {
   renderPhotoEmptyState();
   $("#empty-state").hidden = state.photos.length > 0;
   grid.hidden = state.photos.length === 0;
+	const selected=state.bulkSelections.photos;
   grid.innerHTML = state.photos.map((photo) => `
-    <button class="photo-card ${photo.aspectRatio === "portrait" ? "portrait" : ""} ${photo.availabilityStatus && photo.availabilityStatus !== "available" && photo.availabilityStatus !== "unknown" ? "unavailable" : ""}" data-photo-id="${escapeAttr(photo.id)}" style="background:${escapeAttr(photo.dominantColor)}" aria-label="${escapeAttr(mediaText("photos", "view", { title: photo.title }))}">
+    <article class="photo-card ${selected.has(photo.id) ? "bulk-selected" : ""} ${photo.aspectRatio === "portrait" ? "portrait" : ""} ${photo.availabilityStatus && photo.availabilityStatus !== "available" && photo.availabilityStatus !== "unknown" ? "unavailable" : ""}" data-photo-id="${escapeAttr(photo.id)}" style="background:${escapeAttr(photo.dominantColor)}" aria-label="${escapeAttr(mediaText("photos", "view", { title: photo.title }))}" role="button" tabindex="0">
+	  <label class="card-select" aria-label="${escapeAttr(t("bulkRelations.selectItem",{title:photo.title}))}"><input type="checkbox" data-bulk-id="${escapeAttr(photo.id)}" ${selected.has(photo.id)?"checked":""}></label>
 	  ${photo.thumbnailUrl || photo.imageUrl ? `<img src="${escapeAttr(photo.thumbnailUrl || photo.imageUrl)}" alt="" loading="lazy" decoding="async">` : `<span class="catalog-placeholder">PHOTO</span>`}
       <span class="card-badge">${escapeHTML(availabilityLabel(photo.availabilityStatus) || photo.fileType)}</span>
       <span class="card-copy"><h3>${escapeHTML(photo.title)}</h3><p>${escapeHTML(photo.project)} · ${photo.year}</p></span>
-    </button>`).join("");
-  $$(".photo-card", grid).forEach((card) => card.addEventListener("click", () => openDetail(card.dataset.photoId)));
+    </article>`).join("");
+  bindCatalogCards("photo");
+  renderBulkSelection();
 }
 
 function renderPhotoEmptyState() {
@@ -306,14 +326,137 @@ function renderMediaAssets() {
   $("#empty-clear").hidden = !filtered;
   $("#empty-state").hidden = state.mediaItems.length > 0;
   grid.hidden = state.mediaItems.length === 0;
+	const selected=state.bulkSelections[mediaType];
   grid.innerHTML = state.mediaItems.map((asset) => `
-    <button class="photo-card media-card ${asset.availabilityStatus && asset.availabilityStatus !== "available" && asset.availabilityStatus !== "unknown" ? "unavailable" : ""}" data-media-id="${escapeAttr(asset.id)}" aria-label="${escapeAttr(mediaText(mediaType, "view", { title: asset.title }))}">
+    <article class="photo-card media-card ${selected.has(asset.id) ? "bulk-selected" : ""} ${asset.availabilityStatus && asset.availabilityStatus !== "available" && asset.availabilityStatus !== "unknown" ? "unavailable" : ""}" data-media-id="${escapeAttr(asset.id)}" aria-label="${escapeAttr(mediaText(mediaType, "view", { title: asset.title }))}" role="button" tabindex="0">
+	  <label class="card-select" aria-label="${escapeAttr(t("bulkRelations.selectItem",{title:asset.title}))}"><input type="checkbox" data-bulk-id="${escapeAttr(asset.id)}" ${selected.has(asset.id)?"checked":""}></label>
       ${mediaPreview(asset, mediaType)}
       <span class="media-kind">${mediaType === "videos" ? "▶" : "♪"}</span>
       <span class="card-badge">${escapeHTML(availabilityLabel(asset.availabilityStatus) || formatDuration(asset.durationMs))}</span>
       <span class="card-copy"><h3>${escapeHTML(asset.title)}</h3><p>${escapeHTML(asset.project)} · ${asset.year} · ${escapeHTML(asset.codec)}</p></span>
-    </button>`).join("");
-  $$('[data-media-id]', grid).forEach((card) => card.addEventListener("click", () => openMediaDetail(card.dataset.mediaId)));
+    </article>`).join("");
+  bindCatalogCards("media");
+  renderBulkSelection();
+}
+
+function bindCatalogCards(kind) {
+  const idKey = kind === "photo" ? "photoId" : "mediaId";
+  $$(".photo-card", grid).forEach((card) => {
+    const open = () => kind === "photo" ? openDetail(card.dataset[idKey]) : openMediaDetail(card.dataset[idKey]);
+    card.addEventListener("click", (event) => { if (!event.target.closest(".card-select")) open(); });
+    card.addEventListener("keydown", (event) => {
+      if ((event.key === "Enter" || event.key === " ") && !event.target.matches("input")) { event.preventDefault(); open(); }
+    });
+  });
+  $$('[data-bulk-id]', grid).forEach((input) => input.addEventListener("change", () => {
+    const selected = state.bulkSelections[state.mediaType];
+    if (input.checked) selected.add(input.dataset.bulkId); else selected.delete(input.dataset.bulkId);
+    input.closest(".photo-card")?.classList.toggle("bulk-selected", input.checked);
+    renderBulkSelection();
+  }));
+}
+
+function currentItems() { return state.mediaType === "photos" ? state.photos : state.mediaItems; }
+
+function renderBulkSelection() {
+  const selected = state.bulkSelections[state.mediaType];
+  const visibleIDs = currentItems().map((item) => item.id);
+  const visibleSelected = visibleIDs.filter((id) => selected.has(id)).length;
+  const checkbox = $("#select-visible");
+  checkbox.checked = visibleIDs.length > 0 && visibleSelected === visibleIDs.length;
+  checkbox.indeterminate = visibleSelected > 0 && visibleSelected < visibleIDs.length;
+  $("#bulk-selected-count").textContent = t("bulkRelations.selected", { count: formatNumber(selected.size) });
+  $("#open-bulk-relations").disabled = selected.size === 0;
+}
+
+function toggleVisibleSelection(event) {
+  const selected = state.bulkSelections[state.mediaType];
+  currentItems().forEach((item) => event.target.checked ? selected.add(item.id) : selected.delete(item.id));
+  if (state.mediaType === "photos") renderPhotos(); else renderMediaAssets();
+}
+
+async function selectSearchResults() {
+  const button = $("#select-search-results"), mediaType = state.mediaType;
+  const querySignature = currentListParams(100).toString();
+  button.disabled = true;
+  $("#bulk-selection-message").textContent = t("bulkRelations.selecting");
+  try {
+    const endpoint = mediaType === "photos" ? "/api/v1/photos" : `/api/v1/${mediaType}`;
+    const items = [];
+    let total = 0;
+    for (let offset = 0; offset < 500; offset += 100) {
+      const params = new URLSearchParams(querySignature); params.set("offset", String(offset));
+      const response = await fetch(`${endpoint}?${params}`);
+      const page = await response.json();
+      if (!response.ok) throw new Error(page.error || t("bulkRelations.failed"));
+      total = page.total || 0;
+      items.push(...(page.items || []));
+      if (items.length >= total || !(page.items || []).length) break;
+    }
+    if (state.mediaType !== mediaType || currentListParams(100).toString() !== querySignature) return;
+    const selected = state.bulkSelections[mediaType];
+    items.slice(0, 500).forEach((item) => selected.add(item.id));
+    $("#bulk-selection-message").textContent = total > 500 ? t("bulkRelations.limit", { count: formatNumber(500) }) : "";
+    if (mediaType === "photos") renderPhotos(); else renderMediaAssets();
+  } catch (error) {
+    $("#bulk-selection-message").textContent = error.message || t("bulkRelations.failed");
+  } finally { button.disabled = false; }
+}
+
+function clearBulkSelection() {
+  state.bulkSelections[state.mediaType].clear();
+  $("#bulk-selection-message").textContent = "";
+  if (state.mediaType === "photos") renderPhotos(); else renderMediaAssets();
+}
+
+async function openBulkRelations() {
+  const selected = state.bulkSelections[state.mediaType];
+  if (!selected.size) return;
+  const form = $("#bulk-relations-form");
+  form.reset();
+  $("[data-bulk-relations-message]", form).textContent = "";
+  $("#bulk-relations-summary").textContent = t("bulkRelations.summary", { count: formatNumber(selected.size), media: mediaText(state.mediaType, "label") });
+  $("#bulk-photo-relation").hidden = state.mediaType !== "photos";
+  try {
+    await loadRelationCatalog();
+    for (const kind of ["projects", "stories"]) {
+      const target = $(`[data-bulk-relation-options="${kind}"]`, form);
+      target.innerHTML = (state.relationCatalog?.[kind] || []).map((item) => `<label class="relation-option"><input type="checkbox" name="bulk${kind[0].toUpperCase()+kind.slice(1)}" value="${escapeAttr(item.id)}"><span>${escapeHTML(item.description || item.id)}</span></label>`).join("") || `<p class="relation-empty">${escapeHTML(t("relations.noneAvailable"))}</p>`;
+    }
+    syncBulkRelationForm();
+    bulkRelationsDialog.showModal();
+  } catch (error) {
+    $("#bulk-selection-message").textContent = error.message || t("relations.unavailable");
+  }
+}
+
+function syncBulkRelationForm() {
+  const form = $("#bulk-relations-form"), replace = form.elements.operation.value === "replace";
+  form.elements.applyPhotoRelation.disabled = replace;
+  if (replace) form.elements.applyPhotoRelation.checked = false;
+}
+
+async function applyBulkRelations(event) {
+  event.preventDefault();
+  const form = event.currentTarget, selected = [...state.bulkSelections[state.mediaType]];
+  const payload = { mediaType: mediaConfig[state.mediaType].singular, assetIds: selected, operation: form.elements.operation.value };
+  if (form.elements.applyProjects.checked) payload.projectIds = $$('input[name="bulkProjects"]:checked', form).map((input) => input.value);
+  if (form.elements.applyStories.checked) payload.storyIds = $$('input[name="bulkStories"]:checked', form).map((input) => input.value);
+  if (state.mediaType === "photos" && form.elements.applyPhotoRelation.checked) payload.photoRelation = { direction: form.elements.direction.value, otherPhotoId: valueOf(form, "otherPhotoId"), relationType: valueOf(form, "relationType") || "derivative" };
+  const message = $("[data-bulk-relations-message]", form), submit = $('button[type="submit"]', form);
+  if (!("projectIds" in payload) && !("storyIds" in payload) && !payload.photoRelation) { message.textContent = t("bulkRelations.chooseType"); return; }
+  if (payload.photoRelation && !payload.photoRelation.otherPhotoId) { message.textContent = t("bulkRelations.photoRequired"); return; }
+  submit.disabled = true; message.textContent = t("bulkRelations.saving");
+  try {
+    const response = await fetch("/api/v1/relations/bulk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || t("bulkRelations.failed"));
+    state.bulkSelections[state.mediaType].clear();
+    bulkRelationsDialog.close();
+    $("#bulk-selection-message").textContent = t("bulkRelations.saved", { count: formatNumber(result.assetCount) });
+    await Promise.all([loadFacets(), loadPhotos()]);
+  } catch (error) { message.textContent = error.message || t("bulkRelations.failed"); }
+  finally { submit.disabled = false; }
 }
 
 function renderSkeletons(media = false) {
@@ -363,6 +506,7 @@ function applyMediaUI({ syncURL }) {
     : state.mediaType === "photos" ? "—" : "0";
   renderFacetsForCurrentMedia();
   updateBatchCopy();
+  renderBulkSelection();
   if (syncURL) {
     const url = new URL(window.location.href);
     if (state.mediaType === "photos") url.searchParams.delete("media");
@@ -428,9 +572,16 @@ function syncFacetUI() {
   $$("[data-tag]").forEach((button) => button.classList.toggle("active", state.filters.tags.includes(button.dataset.tag)));
 }
 
-function openDetail(id) {
-  const photo = state.photos.find((item) => item.id === id);
+async function openDetail(id) {
+  let photo = state.photos.find((item) => item.id === id);
   if (!photo) return;
+  try {
+    const response = await fetch(`/api/v1/photos/${encodeURIComponent(id)}`);
+    if (response.ok) {
+      photo = await response.json();
+      state.photos = state.photos.map((item) => item.id === photo.id ? { ...item, ...photo } : item);
+    }
+  } catch (error) { console.error(error); }
   state.selected = photo;
 	closeEditor("photo");
   $("#detail-image").src = photo.availabilityStatus === "available" || photo.availabilityStatus === "unknown" ? photo.imageUrl : photo.thumbnailUrl;
@@ -441,6 +592,7 @@ function openDetail(id) {
   $("#detail-exif").innerHTML = dlItems([[t("field.camera"), photo.camera], [t("field.lens"), photo.lens], [t("field.aperture"), photo.aperture], [t("field.shutter"), photo.shutterSpeed], ["ISO", photo.iso], [t("field.focalLength"), photo.focalLength]]);
   $("#detail-file").innerHTML = dlItems([[t("field.format"), photo.fileType], [t("field.dimensions"), photo.dimensions], [t("field.fileSize"), photo.fileSize], [t("field.year"), photo.year], [t("field.originalStatus"), availabilityLabel(photo.availabilityStatus, true)], [t("field.thumbnailStatus"), availabilityLabel(photo.thumbnailStatus, true)]]);
   $("#detail-tags").innerHTML = photo.tags.map((tag) => `<span># ${escapeHTML(tag)}</span>`).join("");
+  $("#detail-relations").innerHTML = renderPhotoRelations(photo.relations || {});
   $("#detail-location-section").hidden = !photo.location;
   if (photo.location) {
     $("#detail-location").textContent = photo.location.name;
@@ -505,6 +657,7 @@ function renderMediaDetail(asset, mediaType, { loadPlayer = false } = {}) {
   if (mediaType === "videos") mediaInfo.push([t("field.previewStatus"), availabilityLabel(asset.thumbnailStatus, true)]);
   $("#media-detail-info").innerHTML = dlItems(mediaInfo);
   $("#media-detail-tags").innerHTML = (asset.tags || []).map((tag) => `<span># ${escapeHTML(tag)}</span>`).join("");
+  $("#media-detail-relations").innerHTML = renderMediaRelations(asset.relations || {});
   $("#media-detail-transcript").textContent = asset.transcript || t("media.noTranscript");
   const visualCount = (asset.segments || []).filter((segment) => segment.segmentType === "visual").length;
   const audioCount = (asset.segments || []).filter((segment) => segment.segmentType === "audio").length;
@@ -524,24 +677,29 @@ function renderMediaDetail(asset, mediaType, { loadPlayer = false } = {}) {
   $("#media-similar-audio strong").textContent = t(mediaType === "videos" ? "similar.audioVideoAction" : "similar.audioAudioAction");
 }
 
-function openPhotoEditor() {
+async function openPhotoEditor() {
 	const photo = state.selected; if (!photo) return;
 	const form = $("#photo-edit-form");
 	form.hidden = false; $("#photo-edit-open").hidden = true;
-	setFormValue(form,"title",photo.title); setFormValue(form,"project",photo.project);
+	setFormValue(form,"title",photo.title);
 	setFormValue(form,"takenAt",localDateTime(photo.takenAt)); setFormValue(form,"tags",(photo.tags||[]).join(", "));
 	for (const name of ["camera","lens","aperture","shutterSpeed","iso","focalLength","description","copyright","rating"]) setFormValue(form,name,photo[name] ?? "");
 	setFormValue(form,"locationName",photo.location?.name||""); setFormValue(form,"latitude",photo.location?.latitude??""); setFormValue(form,"longitude",photo.location?.longitude??"");
 	form.elements.favorite.checked=Boolean(photo.favorite); form.elements.clearLocation.checked=false;
 	setFormValue(form,"userMetadata",JSON.stringify(photo.userMetadata||{},null,2));
+	setFormValue(form,"parents",serializeDerivations(photo.relations?.parents));
+	setFormValue(form,"children",serializeDerivations(photo.relations?.children));
+	try { await loadRelationCatalog(); renderRelationPickers(form, photo.relations || {}); } catch(error) { showEditError(form,error); }
 }
 
-function openMediaEditor() {
+async function openMediaEditor() {
 	const asset=state.selectedMedia; if(!asset)return;
 	const form=$("#media-edit-form"); form.hidden=false; $("#media-edit-open").hidden=true;
-	for(const name of ["title","project","description","copyright","rating","transcript"]) setFormValue(form,name,asset[name]??"");
+	for(const name of ["title","description","copyright","rating","transcript"]) setFormValue(form,name,asset[name]??"");
 	setFormValue(form,"recordedAt",localDateTime(asset.recordedAt)); setFormValue(form,"tags",(asset.tags||[]).join(", "));
 	form.elements.favorite.checked=Boolean(asset.favorite); setFormValue(form,"userMetadata",JSON.stringify(asset.userMetadata||{},null,2));
+	setFormValue(form,"relatedAssetIds",(asset.relations?.relatedMedia||[]).map((item)=>item.id).join("\n"));
+	try { await loadRelationCatalog(); renderRelationPickers(form, asset.relations || {}); } catch(error) { showEditError(form,error); }
 }
 
 function closeEditor(kind) {
@@ -552,7 +710,8 @@ async function savePhotoEdit(event) {
 	event.preventDefault(); const form=event.currentTarget, photo=state.selected; if(!photo)return;
 	try {
 		const location=coordinatesFrom(form), userMetadata=parseMetadata(form.elements.userMetadata.value);
-		const payload={title:valueOf(form,"title"),project:valueOf(form,"project"),takenAt:isoDate(form,"takenAt"),tags:tagsOf(form),camera:valueOf(form,"camera"),lens:valueOf(form,"lens"),aperture:valueOf(form,"aperture"),shutterSpeed:valueOf(form,"shutterSpeed"),iso:Number(valueOf(form,"iso")||0),focalLength:valueOf(form,"focalLength"),description:valueOf(form,"description"),copyright:valueOf(form,"copyright"),rating:Number(valueOf(form,"rating")||0),favorite:form.elements.favorite.checked,userMetadata,revision:photo.revision||0,clearLocation:form.elements.clearLocation.checked};
+		await saveEntityDescriptionEdits(form); await saveProjectStoryEdits(form);
+		const payload={title:valueOf(form,"title"),takenAt:isoDate(form,"takenAt"),tags:tagsOf(form),camera:valueOf(form,"camera"),lens:valueOf(form,"lens"),aperture:valueOf(form,"aperture"),shutterSpeed:valueOf(form,"shutterSpeed"),iso:Number(valueOf(form,"iso")||0),focalLength:valueOf(form,"focalLength"),description:valueOf(form,"description"),copyright:valueOf(form,"copyright"),rating:Number(valueOf(form,"rating")||0),favorite:form.elements.favorite.checked,userMetadata,projectIds:selectedRelationIDs(form,"projects"),storyIds:selectedRelationIDs(form,"stories"),parents:parseDerivations(valueOf(form,"parents")),children:parseDerivations(valueOf(form,"children")),revision:photo.revision||0,clearLocation:form.elements.clearLocation.checked};
 		if(location)payload.location=location;
 		const updated=await patchAsset(`/api/v1/photos/${encodeURIComponent(photo.id)}`,payload);
 		state.photos=state.photos.map((item)=>item.id===updated.id?updated:item); state.selected=updated; renderPhotos(); openDetail(updated.id); await loadFacets();
@@ -562,7 +721,8 @@ async function savePhotoEdit(event) {
 async function saveMediaEdit(event) {
 	event.preventDefault(); const form=event.currentTarget,asset=state.selectedMedia;if(!asset)return;
 	try {
-		const payload={title:valueOf(form,"title"),project:valueOf(form,"project"),recordedAt:isoDate(form,"recordedAt"),tags:tagsOf(form),description:valueOf(form,"description"),copyright:valueOf(form,"copyright"),rating:Number(valueOf(form,"rating")||0),favorite:form.elements.favorite.checked,transcript:valueOf(form,"transcript"),userMetadata:parseMetadata(form.elements.userMetadata.value),revision:asset.revision||0};
+		await saveEntityDescriptionEdits(form); await saveProjectStoryEdits(form);
+		const payload={title:valueOf(form,"title"),recordedAt:isoDate(form,"recordedAt"),tags:tagsOf(form),description:valueOf(form,"description"),copyright:valueOf(form,"copyright"),rating:Number(valueOf(form,"rating")||0),favorite:form.elements.favorite.checked,transcript:valueOf(form,"transcript"),userMetadata:parseMetadata(form.elements.userMetadata.value),projectIds:selectedRelationIDs(form,"projects"),storyIds:selectedRelationIDs(form,"stories"),relatedAssetIds:valueOf(form,"relatedAssetIds").split(/\s+/).filter(Boolean),revision:asset.revision||0};
 		const updated=await patchAsset(`/api/v1/${state.mediaType}/${encodeURIComponent(asset.id)}`,payload);
 		state.selectedMedia=updated; state.mediaItems=state.mediaItems.map((item)=>item.id===updated.id?{...item,...updated}:item); renderMediaAssets(); renderMediaDetail(updated,state.mediaType,{loadPlayer:false}); await loadFacets();
 	} catch(error){showEditError(form,error);}
@@ -577,6 +737,76 @@ function localDateTime(value){if(!value)return"";const date=new Date(value),offs
 function coordinatesFrom(form){const lat=valueOf(form,"latitude"),lng=valueOf(form,"longitude");if(lat===""||lng==="")return null;return{name:valueOf(form,"locationName"),latitude:Number(lat),longitude:Number(lng)};}
 function parseMetadata(value){try{return JSON.parse(value||"{}");}catch{throw new Error(t("edit.invalidJSON"));}}
 function showEditError(form,error){const target=$("[data-edit-message]",form);target.textContent=error.message||t("edit.failed");}
+
+async function loadRelationCatalog(force=false) {
+  if (state.relationCatalog && !force) return state.relationCatalog;
+  const response=await fetch("/api/v1/relations/catalog");
+  if(!response.ok)throw new Error(t("relations.unavailable"));
+  state.relationCatalog=await response.json();
+  return state.relationCatalog;
+}
+
+function renderRelationPickers(form,relations) {
+  const selected={projects:new Set((relations.projects||[]).map((item)=>item.id)),stories:new Set((relations.stories||[]).map((item)=>item.id))};
+  for(const kind of ["projects","stories"]){
+    const target=$(`[data-relation-options="${kind}"]`,form); if(!target)continue;
+    const items=state.relationCatalog?.[kind]||[];
+    target.innerHTML=items.length?items.map((item)=>kind==="projects"?projectOption(item,selected[kind].has(item.id)):entityOption(kind,item,selected[kind].has(item.id))).join(""):`<p class="relation-empty">${escapeHTML(t("relations.noneAvailable"))}</p>`;
+  }
+}
+
+function entityOption(kind,item,checked){return`<label class="relation-option"><input type="checkbox" name="${kind}" value="${escapeAttr(item.id)}" ${checked?"checked":""}><input type="text" value="${escapeAttr(item.description||item.id)}" data-entity-kind="${kind.slice(0,-1)}" data-entity-id="${escapeAttr(item.id)}" data-original="${escapeAttr(item.description||item.id)}" aria-label="${escapeAttr(t("relations.description"))}"></label>`;}
+function projectOption(item,checked){
+  const linked=new Set((state.relationCatalog?.projectStories||[]).filter((link)=>link.projectId===item.id).map((link)=>link.storyId));
+  const stories=(state.relationCatalog?.stories||[]).map((story)=>`<label><input type="checkbox" data-project-story="${escapeAttr(item.id)}" value="${escapeAttr(story.id)}" ${linked.has(story.id)?"checked":""}>${escapeHTML(story.description||story.id)}</label>`).join("");
+  return`<div class="relation-project-option" data-project-story-owner="${escapeAttr(item.id)}" data-original-story-ids="${escapeAttr([...linked].sort().join(","))}">${entityOption("projects",item,checked)}<div class="project-story-options"><strong>${escapeHTML(t("relations.projectStories"))}</strong>${stories||`<i class="relation-empty">${escapeHTML(t("relations.noneAvailable"))}</i>`}</div></div>`;
+}
+
+function selectedRelationIDs(form,kind){return $$(`input[name="${kind}"]:checked`,form).map((input)=>input.value);}
+
+async function createRelationEntity(button){
+  const form=button.closest("form"),kind=button.dataset.createRelationEntity,input=form.elements[kind==="project"?"newProjectDescription":"newStoryDescription"],description=String(input.value||"").trim();
+  if(!description){showEditError(form,new Error(t("relations.descriptionRequired")));return;}
+  try{
+    const selectedProjects=selectedRelationIDs(form,"projects"),selectedStories=selectedRelationIDs(form,"stories");
+    const response=await fetch(`/api/v1/${relationEntityCollection(kind)}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({description})});
+    const body=await response.json();if(!response.ok)throw new Error(body.error||t("edit.failed"));
+    state.relationCatalog=null;await loadRelationCatalog(true);input.value="";
+    const relations={projects:(state.relationCatalog.projects||[]).filter((item)=>selectedProjects.includes(item.id)||kind==="project"&&item.id===body.id),stories:(state.relationCatalog.stories||[]).filter((item)=>selectedStories.includes(item.id)||kind==="story"&&item.id===body.id)};
+    renderRelationPickers(form,relations);
+  }catch(error){showEditError(form,error);}
+}
+
+async function saveEntityDescriptionEdits(form){
+  for(const input of $$('[data-entity-id]',form)){
+    const description=String(input.value||"").trim();
+    if(description===input.dataset.original)continue;
+    if(!description)throw new Error(t("relations.descriptionRequired"));
+    const response=await fetch(`/api/v1/${relationEntityCollection(input.dataset.entityKind)}/${encodeURIComponent(input.dataset.entityId)}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({description})});
+    const body=await response.json();if(!response.ok)throw new Error(body.error||t("edit.failed"));
+    input.dataset.original=description;
+  }
+  state.relationCatalog=null;
+}
+
+async function saveProjectStoryEdits(form){
+  for(const owner of $$('[data-project-story-owner]',form)){
+    const storyIds=$$('[data-project-story]:checked',owner).map((input)=>input.value).sort();
+    if(storyIds.join(",")===owner.dataset.originalStoryIds)continue;
+    const response=await fetch(`/api/v1/projects/${encodeURIComponent(owner.dataset.projectStoryOwner)}/stories`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({storyIds})});
+    const body=await response.json();if(!response.ok)throw new Error(body.error||t("edit.failed"));
+    owner.dataset.originalStoryIds=storyIds.join(",");
+  }
+  state.relationCatalog=null;
+}
+
+function serializeDerivations(items){return(items||[]).map((item)=>`${item.photo.id} | ${item.relationType||"derivative"}`).join("\n");}
+function relationEntityCollection(kind){return kind==="story"?"stories":"projects";}
+function parseDerivations(value){return String(value||"").split(/\n+/).map((line)=>{const [photoId,...type]=line.split("|");return{photoId:photoId.trim(),relationType:type.join("|").trim()||"derivative"};}).filter((item)=>item.photoId);}
+
+function renderPhotoRelations(relations){return [relationGroup(t("relations.projects"),relations.projects,(item)=>item.description||item.id),relationGroup(t("relations.stories"),relations.stories,(item)=>item.description||item.id),relationGroup(t("relations.parents"),relations.parents,(item)=>`${item.photo.title} · ${item.relationType}`),relationGroup(t("relations.children"),relations.children,(item)=>`${item.photo.title} · ${item.relationType}`)].join("");}
+function renderMediaRelations(relations){return [relationGroup(t("relations.projects"),relations.projects,(item)=>item.description||item.id),relationGroup(t("relations.stories"),relations.stories,(item)=>item.description||item.id),relationGroup(t("relations.relatedMedia"),relations.relatedMedia,(item)=>`${item.mediaType}: ${item.title}`)].join("");}
+function relationGroup(label,items,format){const values=(items||[]).map((item)=>`<span title="${escapeAttr(item.id||item.photo?.id||"")}">${escapeHTML(format(item))}</span>`).join("");return`<div class="relation-group"><strong>${escapeHTML(label)}</strong><div class="relation-values">${values||`<i class="relation-empty">${escapeHTML(t("relations.none"))}</i>`}</div></div>`;}
 
 async function showSimilarMedia(modality) {
   const asset = state.selectedMedia;

@@ -33,10 +33,10 @@ run-mcp:
 	go run ./cmd/apofocus-mcp
 
 migrate-up:
-	psql "$(DATABASE_URL)" -v ON_ERROR_STOP=1 -f migrations/000001_init.sql -f migrations/000002_ingest.sql -f migrations/000003_folders_and_batch.sql -f migrations/000004_multimedia.sql -f migrations/000005_storage_tracking.sql -f migrations/000006_editing_and_init.sql
+	psql "$(DATABASE_URL)" -v ON_ERROR_STOP=1 -f migrations/000001_init.sql -f migrations/000002_ingest.sql -f migrations/000003_folders_and_batch.sql -f migrations/000004_multimedia.sql -f migrations/000005_storage_tracking.sql -f migrations/000006_editing_and_init.sql -f migrations/000007_projects_stories_relations.sql
 
 migrate-down:
-	psql "$(DATABASE_URL)" -v ON_ERROR_STOP=1 -f migrations/000006_down.sql -f migrations/000005_down.sql -f migrations/000004_down.sql -f migrations/000003_down.sql -f migrations/000001_down.sql
+	psql "$(DATABASE_URL)" -v ON_ERROR_STOP=1 -f migrations/000007_down.sql -f migrations/000006_down.sql -f migrations/000005_down.sql -f migrations/000004_down.sql -f migrations/000003_down.sql -f migrations/000001_down.sql
 
 embedding-install:
 	python3 -m venv .venv

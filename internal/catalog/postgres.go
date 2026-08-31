@@ -17,7 +17,8 @@ type PostgresStore struct {
 func NewPostgresStore(db *sql.DB) *PostgresStore { return &PostgresStore{db: db} }
 
 const photoSelect = `
-SELECT p.id::text, p.title, p.capture_year, COALESCE(pr.name, ''), p.taken_at,
+SELECT p.id::text, p.title, p.capture_year,
+       COALESCE((SELECT COALESCE(NULLIF(rp.description,''),rp.name,'') FROM project_photos rpp JOIN projects rp ON rp.id=rpp.project_id WHERE rpp.photo_id=p.id ORDER BY COALESCE(NULLIF(rp.description,''),rp.name,''),rp.id LIMIT 1),pr.name,''), p.taken_at,
        COALESCE((SELECT json_agg(t.name ORDER BY t.name) FROM photo_tags pt JOIN tags t ON t.id = pt.tag_id WHERE pt.photo_id = p.id), '[]')::text,
        COALESCE(p.camera, ''), COALESCE(p.lens, ''), COALESCE(p.aperture, ''), COALESCE(p.shutter_speed, ''),
        COALESCE(p.iso, 0), COALESCE(p.focal_length, ''), COALESCE(p.dimensions, ''), COALESCE(p.file_type, ''),
@@ -62,7 +63,13 @@ func (s *PostgresStore) Get(ctx context.Context, id string) (Photo, error) {
 	if errors.Is(err, sql.ErrNoRows) {
 		return Photo{}, ErrNotFound
 	}
-	return photo, err
+	if err != nil {
+		return Photo{}, err
+	}
+	if err := s.loadPhotoRelations(ctx, &photo); err != nil {
+		return Photo{}, fmt.Errorf("load photo relations: %w", err)
+	}
+	return photo, nil
 }
 
 func (s *PostgresStore) Facets(ctx context.Context) (Facets, error) {
@@ -72,7 +79,7 @@ func (s *PostgresStore) Facets(ctx context.Context) (Facets, error) {
 		target *[]FacetCount
 	}{
 		{`SELECT capture_year::text, count(*) FROM photos GROUP BY capture_year ORDER BY capture_year DESC`, &facets.Years},
-		{`SELECT pr.name, count(*) FROM photos p JOIN projects pr ON pr.id=p.project_id GROUP BY pr.name ORDER BY count(*) DESC, pr.name`, &facets.Projects},
+		{`SELECT COALESCE(NULLIF(pr.description,''),pr.name,''),count(*) FROM project_photos pp JOIN projects pr ON pr.id=pp.project_id GROUP BY pr.id,pr.description,pr.name ORDER BY count(*) DESC,COALESCE(NULLIF(pr.description,''),pr.name,'')`, &facets.Projects},
 		{`SELECT t.name, count(*) FROM photo_tags pt JOIN tags t ON t.id=pt.tag_id GROUP BY t.name ORDER BY count(*) DESC, t.name`, &facets.Tags},
 		{`SELECT camera, count(*) FROM photos WHERE camera IS NOT NULL GROUP BY camera ORDER BY count(*) DESC, camera`, &facets.Cameras},
 		{`SELECT lens, count(*) FROM photos WHERE lens IS NOT NULL GROUP BY lens ORDER BY count(*) DESC, lens`, &facets.Lenses},
@@ -140,18 +147,18 @@ func buildWhere(filter Filter) (string, []any) {
 		clauses = append(clauses, fmt.Sprintf(`(
 			p.search_document @@ websearch_to_tsquery('simple', $%d)
 			OR p.title ILIKE '%%' || $%d || '%%'
-			OR pr.name ILIKE '%%' || $%d || '%%'
+			OR EXISTS (SELECT 1 FROM project_photos qpp JOIN projects qp ON qp.id=qpp.project_id WHERE qpp.photo_id=p.id AND (qp.name ILIKE '%%'||$%d||'%%' OR qp.description ILIKE '%%'||$%d||'%%'))
 			OR EXISTS (
 				SELECT 1 FROM photo_tags qpt JOIN tags qt ON qt.id=qpt.tag_id
 				WHERE qpt.photo_id=p.id AND qt.name ILIKE '%%' || $%d || '%%'
 			)
-		)`, index, index, index, index))
+		)`, index, index, index, index, index))
 	}
 	if filter.Year != 0 {
 		add(`p.capture_year = $%d`, filter.Year)
 	}
 	if filter.Project != "" {
-		add(`pr.name = $%d`, filter.Project)
+		add(`EXISTS (SELECT 1 FROM project_photos fpp JOIN projects fp ON fp.id=fpp.project_id WHERE fpp.photo_id=p.id AND COALESCE(NULLIF(fp.description,''),fp.name,'')=$%d)`, filter.Project)
 	}
 	if filter.Camera != "" {
 		add(`p.camera = $%d`, filter.Camera)

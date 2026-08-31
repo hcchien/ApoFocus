@@ -70,6 +70,9 @@ func (s *PostgresStore) Update(ctx context.Context, id string, input PhotoUpdate
 			return Photo{}, err
 		}
 	}
+	if err := replacePhotoRelations(ctx, tx, id, input); err != nil {
+		return Photo{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return Photo{}, err
 	}
@@ -129,6 +132,9 @@ func (s *PostgresStore) UpdateMedia(ctx context.Context, mediaType, id string, i
 		if _, err := tx.ExecContext(ctx, `UPDATE media_assets SET transcript_user_edited=true WHERE id=$1`, id); err != nil {
 			return MediaAsset{}, err
 		}
+	}
+	if err := replaceMediaRelations(ctx, tx, id, mediaType, input); err != nil {
+		return MediaAsset{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return MediaAsset{}, err

@@ -102,6 +102,14 @@
           </div>
         </div>
         <div class="active-filters" id="active-filters" aria-live="polite"></div>
+        <div class="bulk-selection-bar" id="bulk-selection-bar">
+          <label><input id="select-visible" type="checkbox"><span data-i18n="bulkRelations.selectVisible">勾選目前顯示</span></label>
+          <button id="select-search-results" type="button" data-i18n="bulkRelations.selectSearch">勾選全部搜尋結果</button>
+          <strong id="bulk-selected-count">已選擇 0 筆</strong>
+          <span id="bulk-selection-message" role="status"></span>
+          <button id="clear-selection" type="button" data-i18n="bulkRelations.clear">清除勾選</button>
+          <button class="bulk-update-open" id="open-bulk-relations" type="button" disabled data-i18n="bulkRelations.open">批次修改關聯</button>
+        </div>
         <div class="photo-grid" id="photo-grid" aria-live="polite"></div>
         <div class="empty-state" id="empty-state" hidden><span id="empty-symbol">0</span><h2 id="empty-title">沒有符合條件的照片</h2><p id="empty-copy">試著放寬篩選條件，或換一個搜尋關鍵字。</p><button id="empty-clear" data-i18n="media.clearAll">清除所有篩選</button></div>
         </section>
@@ -119,9 +127,12 @@
         <form class="metadata-edit-form" id="photo-edit-form" hidden>
           <div class="edit-form-head"><strong data-i18n="edit.photoTitle">編輯照片資料</strong><button type="button" data-edit-cancel="photo" data-i18n="common.cancel">取消</button></div>
           <label><span data-i18n="edit.title">標題</span><input name="title" required maxlength="240"></label>
-          <label><span data-i18n="edit.project">專題</span><input name="project" maxlength="120"></label>
           <label><span data-i18n="edit.date">拍攝時間</span><input name="takenAt" type="datetime-local"></label>
           <label class="wide"><span data-i18n="edit.tags">Tags（逗號分隔）</span><input name="tags"></label>
+          <fieldset class="relation-fieldset wide"><legend data-i18n="relations.projects">Projects</legend><div class="relation-options" data-relation-options="projects"></div><div class="relation-create"><input name="newProjectDescription" data-i18n-placeholder="relations.newProjectPlaceholder" placeholder="新增 Project description"><button type="button" data-create-relation-entity="project" data-i18n="relations.add">新增</button></div></fieldset>
+          <fieldset class="relation-fieldset wide"><legend data-i18n="relations.stories">Stories</legend><div class="relation-options" data-relation-options="stories"></div><div class="relation-create"><input name="newStoryDescription" data-i18n-placeholder="relations.newStoryPlaceholder" placeholder="新增 Story description"><button type="button" data-create-relation-entity="story" data-i18n="relations.add">新增</button></div></fieldset>
+          <label class="wide"><span data-i18n="relations.parentsInput">Parent 照片（每行：Photo ID | 關係類型）</span><textarea name="parents" rows="3"></textarea></label>
+          <label class="wide"><span data-i18n="relations.childrenInput">衍生照片（每行：Photo ID | 關係類型）</span><textarea name="children" rows="3"></textarea></label>
           <label><span data-i18n="filters.camera">相機</span><input name="camera"></label><label><span data-i18n="filters.lens">鏡頭</span><input name="lens"></label>
           <label><span data-i18n="field.aperture">光圈</span><input name="aperture"></label><label><span data-i18n="field.shutter">快門</span><input name="shutterSpeed"></label>
           <label><span>ISO</span><input name="iso" type="number" min="0"></label><label><span data-i18n="field.focalLength">焦距</span><input name="focalLength"></label>
@@ -138,6 +149,7 @@
         <div class="detail-section"><h3 data-i18n="detail.photoInfo">拍攝資訊</h3><dl id="detail-exif"></dl></div>
         <div class="detail-section" id="detail-location-section"><h3 data-i18n="detail.location">地點</h3><div class="location-card"><svg viewBox="0 0 24 24"><path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg><span><strong id="detail-location"></strong><small id="detail-coordinates"></small></span></div></div>
         <div class="detail-section"><h3 data-i18n="detail.tags">標籤</h3><div class="detail-tags" id="detail-tags"></div></div>
+        <div class="detail-section"><h3 data-i18n="relations.heading">關聯資料</h3><div class="relation-summary" id="detail-relations"></div></div>
         <div class="detail-section"><h3 data-i18n="detail.file">檔案</h3><dl id="detail-file"></dl></div>
       </aside>
     </div>
@@ -160,9 +172,12 @@
         <button class="edit-open-button" id="media-edit-open" type="button" data-i18n="edit.open">編輯資料</button>
         <form class="metadata-edit-form" id="media-edit-form" hidden>
           <div class="edit-form-head"><strong data-i18n="edit.mediaTitle">編輯影音資料</strong><button type="button" data-edit-cancel="media" data-i18n="common.cancel">取消</button></div>
-          <label><span data-i18n="edit.title">標題</span><input name="title" required maxlength="240"></label><label><span data-i18n="edit.project">專題</span><input name="project" maxlength="120"></label>
+          <label><span data-i18n="edit.title">標題</span><input name="title" required maxlength="240"></label>
           <label><span data-i18n="edit.date">錄製時間</span><input name="recordedAt" type="datetime-local"></label><label><span data-i18n="edit.rating">評分</span><select name="rating"><option value="0">—</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
           <label class="wide"><span data-i18n="edit.tags">Tags（逗號分隔）</span><input name="tags"></label>
+          <fieldset class="relation-fieldset wide"><legend data-i18n="relations.projects">Projects</legend><div class="relation-options" data-relation-options="projects"></div><div class="relation-create"><input name="newProjectDescription" data-i18n-placeholder="relations.newProjectPlaceholder" placeholder="新增 Project description"><button type="button" data-create-relation-entity="project" data-i18n="relations.add">新增</button></div></fieldset>
+          <fieldset class="relation-fieldset wide"><legend data-i18n="relations.stories">Stories</legend><div class="relation-options" data-relation-options="stories"></div><div class="relation-create"><input name="newStoryDescription" data-i18n-placeholder="relations.newStoryPlaceholder" placeholder="新增 Story description"><button type="button" data-create-relation-entity="story" data-i18n="relations.add">新增</button></div></fieldset>
+          <label class="wide"><span data-i18n="relations.relatedMediaInput">相關素材（每行一個 Audio/Video ID）</span><textarea name="relatedAssetIds" rows="3"></textarea></label>
           <label class="wide"><span data-i18n="edit.description">說明</span><textarea name="description" rows="3"></textarea></label><label class="wide"><span data-i18n="edit.copyright">Copyright</span><input name="copyright"></label>
           <label class="wide"><span data-i18n="detail.transcript">逐字稿</span><textarea name="transcript" rows="6"></textarea></label>
           <label class="check-row"><input name="favorite" type="checkbox"><span class="fake-check"><svg viewBox="0 0 16 16"><path d="m3 8 3 3 7-7"/></svg></span><span data-i18n="edit.favorite">加入精選</span></label>
@@ -175,10 +190,27 @@
         </div>
         <div class="detail-section"><h3 data-i18n="detail.mediaInfo">媒體資訊</h3><dl id="media-detail-info"></dl></div>
         <div class="detail-section"><h3 data-i18n="detail.tags">標籤</h3><div class="detail-tags" id="media-detail-tags"></div></div>
+        <div class="detail-section"><h3 data-i18n="relations.heading">關聯資料</h3><div class="relation-summary" id="media-detail-relations"></div></div>
         <div class="detail-section transcript-section"><h3 data-i18n="detail.transcript">逐字稿</h3><p id="media-detail-transcript"></p></div>
         <div class="detail-section"><h3 data-i18n="detail.segments">索引片段</h3><p class="segment-summary" id="media-detail-segments"></p></div>
       </aside>
     </div>
+  </dialog>
+
+  <dialog class="bulk-relations-dialog" id="bulk-relations-dialog">
+    <div class="finder-head"><div><p class="eyebrow">BULK RELATION EDIT</p><h2 data-i18n="bulkRelations.title">批次修改關聯</h2><p id="bulk-relations-summary"></p></div><button class="dialog-close inline" id="bulk-relations-close" type="button" aria-label="關閉" data-i18n-aria-label="common.close"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+    <form class="bulk-relations-form" id="bulk-relations-form">
+      <label><span data-i18n="bulkRelations.operation">操作方式</span><select name="operation"><option value="add" data-i18n="bulkRelations.add">新增關聯</option><option value="remove" data-i18n="bulkRelations.remove">移除關聯</option><option value="replace" data-i18n="bulkRelations.replace">取代全部關聯</option></select></label>
+      <fieldset class="relation-fieldset"><legend><label><input name="applyProjects" type="checkbox"> <span data-i18n="relations.projects">Projects</span></label></legend><div class="relation-options" data-bulk-relation-options="projects"></div></fieldset>
+      <fieldset class="relation-fieldset"><legend><label><input name="applyStories" type="checkbox"> <span data-i18n="relations.stories">Stories</span></label></legend><div class="relation-options" data-bulk-relation-options="stories"></div></fieldset>
+      <fieldset class="relation-fieldset bulk-photo-relation" id="bulk-photo-relation"><legend><label><input name="applyPhotoRelation" type="checkbox"> <span data-i18n="bulkRelations.photoRelation">Photo parent／child</span></label></legend>
+        <label><span data-i18n="bulkRelations.direction">勾選照片是</span><select name="direction"><option value="children_of" data-i18n="bulkRelations.childrenOf">指定 Parent 的 children</option><option value="parents_of" data-i18n="bulkRelations.parentsOf">指定 Child 的 parents</option></select></label>
+        <label><span data-i18n="bulkRelations.otherPhoto">另一端 Photo ID</span><input name="otherPhotoId" placeholder="UUID"></label>
+        <label><span data-i18n="bulkRelations.relationType">關係類型</span><input name="relationType" value="derivative" placeholder="raw_export"></label>
+      </fieldset>
+      <p class="edit-message" data-bulk-relations-message></p>
+      <button class="batch-submit" type="submit" data-i18n="bulkRelations.apply">套用到已選項目</button>
+    </form>
   </dialog>
 
   <dialog class="folder-dialog" id="folder-dialog">

@@ -10,7 +10,8 @@ import (
 )
 
 const mediaSelect = `
-SELECT m.id::text, m.media_type, m.title, m.capture_year, COALESCE(pr.name, ''), m.recorded_at,
+SELECT m.id::text, m.media_type, m.title, m.capture_year,
+       COALESCE((SELECT COALESCE(NULLIF(rp.description,''),rp.name,'') FROM project_media_assets rpm JOIN projects rp ON rp.id=rpm.project_id WHERE rpm.media_asset_id=m.id ORDER BY COALESCE(NULLIF(rp.description,''),rp.name,''),rp.id LIMIT 1),pr.name,''), m.recorded_at,
        m.duration_ms, m.mime_type, m.codec, m.dimensions, COALESCE(m.sample_rate, 0), COALESCE(m.channels, 0),
        COALESCE((SELECT json_agg(t.name ORDER BY t.name) FROM media_asset_tags mat JOIN tags t ON t.id=mat.tag_id WHERE mat.media_asset_id=m.id), '[]')::text,
        m.path, COALESCE(m.thumbnail_path, ''), m.media_url, m.thumbnail_url, m.transcript,
@@ -56,6 +57,9 @@ func (s *PostgresStore) GetMedia(ctx context.Context, mediaType, id string) (Med
 	if err != nil {
 		return MediaAsset{}, err
 	}
+	if err := s.loadMediaRelations(ctx, &asset); err != nil {
+		return MediaAsset{}, fmt.Errorf("load media relations: %w", err)
+	}
 	rows, err := s.db.QueryContext(ctx, `SELECT id::text,segment_type,segment_index,start_ms,end_ms,keyframe_url,transcript,tags::text,metadata::text,COALESCE(keyframe_status,'unknown')
 		FROM media_segments WHERE media_asset_id=$1 ORDER BY start_ms,segment_type,segment_index`, id)
 	if err != nil {
@@ -86,7 +90,7 @@ func (s *PostgresStore) MediaFacets(ctx context.Context, mediaType string) (Medi
 		target *[]FacetCount
 	}{
 		{`SELECT capture_year::text,count(*) FROM media_assets WHERE media_type=$1 GROUP BY capture_year ORDER BY capture_year DESC`, &facets.Years},
-		{`SELECT pr.name,count(*) FROM media_assets m JOIN projects pr ON pr.id=m.project_id WHERE m.media_type=$1 GROUP BY pr.name ORDER BY count(*) DESC,pr.name`, &facets.Projects},
+		{`SELECT COALESCE(NULLIF(pr.description,''),pr.name,''),count(*) FROM project_media_assets pm JOIN media_assets m ON m.id=pm.media_asset_id JOIN projects pr ON pr.id=pm.project_id WHERE m.media_type=$1 GROUP BY pr.id,pr.description,pr.name ORDER BY count(*) DESC,COALESCE(NULLIF(pr.description,''),pr.name,'')`, &facets.Projects},
 		{`SELECT t.name,count(*) FROM media_asset_tags mat JOIN media_assets m ON m.id=mat.media_asset_id JOIN tags t ON t.id=mat.tag_id WHERE m.media_type=$1 GROUP BY t.name ORDER BY count(*) DESC,t.name`, &facets.Tags},
 		{`SELECT codec,count(*) FROM media_assets WHERE media_type=$1 AND codec<>'' GROUP BY codec ORDER BY count(*) DESC,codec`, &facets.Codecs},
 	}
@@ -173,13 +177,13 @@ func buildMediaWhere(filter MediaFilter) (string, []any) {
 	if filter.Query != "" {
 		args = append(args, filter.Query)
 		i := len(args)
-		clauses = append(clauses, fmt.Sprintf(`(m.search_document @@ websearch_to_tsquery('simple',$%d) OR m.title ILIKE '%%'||$%d||'%%' OR pr.name ILIKE '%%'||$%d||'%%' OR EXISTS (SELECT 1 FROM media_asset_tags qmat JOIN tags qt ON qt.id=qmat.tag_id WHERE qmat.media_asset_id=m.id AND qt.name ILIKE '%%'||$%d||'%%'))`, i, i, i, i))
+		clauses = append(clauses, fmt.Sprintf(`(m.search_document @@ websearch_to_tsquery('simple',$%d) OR m.title ILIKE '%%'||$%d||'%%' OR EXISTS (SELECT 1 FROM project_media_assets qpm JOIN projects qp ON qp.id=qpm.project_id WHERE qpm.media_asset_id=m.id AND (qp.name ILIKE '%%'||$%d||'%%' OR qp.description ILIKE '%%'||$%d||'%%')) OR EXISTS (SELECT 1 FROM media_asset_tags qmat JOIN tags qt ON qt.id=qmat.tag_id WHERE qmat.media_asset_id=m.id AND qt.name ILIKE '%%'||$%d||'%%'))`, i, i, i, i, i))
 	}
 	if filter.Year != 0 {
 		add(`m.capture_year=$%d`, filter.Year)
 	}
 	if filter.Project != "" {
-		add(`pr.name=$%d`, filter.Project)
+		add(`EXISTS (SELECT 1 FROM project_media_assets fpm JOIN projects fp ON fp.id=fpm.project_id WHERE fpm.media_asset_id=m.id AND COALESCE(NULLIF(fp.description,''),fp.name,'')=$%d)`, filter.Project)
 	}
 	if filter.Codec != "" {
 		add(`m.codec=$%d`, filter.Codec)

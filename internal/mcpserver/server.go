@@ -46,13 +46,16 @@ func New(manager *ingest.Manager, importRoots []string, libraryRoot string) *mcp
 }
 
 func NewWithOptions(options Options) *mcp.Server {
-	server := mcp.NewServer(&mcp.Implementation{Name: "apofocus", Version: "v0.5.0"}, nil)
+	server := mcp.NewServer(&mcp.Implementation{Name: "apofocus", Version: "v0.7.0"}, nil)
 	addPhotoImportTools(server, options.PhotoImporter, options.ImportRoots, options.LibraryRoot)
 	if options.Photos != nil {
 		addPhotoCatalogTools(server, options.Photos)
 	}
 	if options.Media != nil {
 		addMediaCatalogTools(server, options.Media)
+	}
+	if options.Relations != nil {
+		addRelationTools(server, options.Relations)
 	}
 	if options.MediaImporter != nil {
 		addMediaImportTools(server, options.MediaImporter)

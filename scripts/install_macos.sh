@@ -473,6 +473,9 @@ fi
 if ! relation_exists init_runs; then
   PGPASSWORD="$DB_PASSWORD" "${PSQL[@]}" -d apofocus -f "$PROJECT_ROOT/migrations/000006_editing_and_init.sql"
 fi
+if ! relation_exists stories; then
+  PGPASSWORD="$DB_PASSWORD" "${PSQL[@]}" -d apofocus -f "$PROJECT_ROOT/migrations/000007_projects_stories_relations.sql"
+fi
 
 vector_version="$(PGPASSWORD="$DB_PASSWORD" "${PSQL[@]}" -d apofocus -Atqc "SELECT extversion FROM pg_extension WHERE extname='vector'")"
 [[ -n "$vector_version" ]] || fail "pgvector extension was not created"

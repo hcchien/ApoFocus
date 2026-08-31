@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -16,6 +17,38 @@ import (
 
 func testServer() http.Handler {
 	return New(catalog.NewMemoryStore(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+}
+
+type fakeRelationStore struct{}
+
+func (fakeRelationStore) ListRelationCatalog(context.Context) (catalog.RelationCatalog, error) {
+	return catalog.RelationCatalog{Projects: []catalog.Project{{ID: "project-id", Description: "Project description"}}, Stories: []catalog.Story{{ID: "story-id", Description: "Story description"}}}, nil
+}
+func (fakeRelationStore) CreateProject(_ context.Context, description string) (catalog.Project, error) {
+	return catalog.Project{ID: "project-id", Description: description}, nil
+}
+func (fakeRelationStore) UpdateProject(_ context.Context, id, description string) (catalog.Project, error) {
+	return catalog.Project{ID: id, Description: description}, nil
+}
+func (fakeRelationStore) CreateStory(_ context.Context, description string) (catalog.Story, error) {
+	return catalog.Story{ID: "story-id", Description: description}, nil
+}
+func (fakeRelationStore) UpdateStory(_ context.Context, id, description string) (catalog.Story, error) {
+	return catalog.Story{ID: id, Description: description}, nil
+}
+func (fakeRelationStore) ReplaceProjectStories(_ context.Context, _ string, storyIDs []string) ([]catalog.Story, error) {
+	items := make([]catalog.Story, len(storyIDs))
+	for index, id := range storyIDs {
+		items[index] = catalog.Story{ID: id, Description: "linked"}
+	}
+	return items, nil
+}
+func (fakeRelationStore) BulkUpdateRelations(_ context.Context, input catalog.BulkRelationUpdate) (catalog.BulkRelationResult, error) {
+	return catalog.BulkRelationResult{MediaType: input.MediaType, Operation: input.Operation, AssetCount: len(input.AssetIDs)}, nil
+}
+
+func relationTestServer() http.Handler {
+	return NewWithOptions(catalog.NewMemoryStore(), slog.New(slog.NewTextHandler(io.Discard, nil)), Options{Relations: fakeRelationStore{}})
 }
 
 func TestListPhotosAPI(t *testing.T) {
@@ -80,6 +113,89 @@ func TestUpdatePhotoRequiresRevision(t *testing.T) {
 	}
 }
 
+func TestRelationCatalogAndEntityWrites(t *testing.T) {
+	server := relationTestServer()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/relations/catalog", nil)
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Project description") || !strings.Contains(response.Body.String(), "Story description") {
+		t.Fatalf("unexpected relation catalog: %d %s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/stories", strings.NewReader(`{"description":"A new story"}`))
+	request.Header.Set("Content-Type", "application/json")
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), "A new story") {
+		t.Fatalf("unexpected story create: %d %s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodPatch, "/api/v1/projects/project-id", strings.NewReader(`{"description":"Updated project"}`))
+	request.Header.Set("Content-Type", "application/json")
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Updated project") {
+		t.Fatalf("unexpected project update: %d %s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodPut, "/api/v1/projects/00000000-0000-4000-8000-000000000001/stories", strings.NewReader(`{"storyIds":["00000000-0000-4000-8000-000000000002"]}`))
+	request.Header.Set("Content-Type", "application/json")
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "00000000-0000-4000-8000-000000000002") {
+		t.Fatalf("unexpected project-story update: %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestPhotoRelationshipUpdateRejectsNonUUIDs(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/photos/a1", strings.NewReader(`{"projectIds":["not-a-uuid"],"revision":0}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	testServer().ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "must contain UUIDs") {
+		t.Fatalf("expected UUID validation, got %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestBulkRelationshipUpdate(t *testing.T) {
+	server := relationTestServer()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/relations/bulk", strings.NewReader(`{
+		"mediaType":"photo","assetIds":["00000000-0000-4000-8000-000000000001","00000000-0000-4000-8000-000000000002"],
+		"operation":"add","projectIds":["00000000-0000-4000-8000-000000000003"],
+		"photoRelation":{"direction":"children_of","otherPhotoId":"00000000-0000-4000-8000-000000000004","relationType":"raw_export"}
+	}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"assetCount":2`) {
+		t.Fatalf("unexpected bulk update: %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestBulkRelationshipUpdateValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"empty selection", `{"mediaType":"photo","assetIds":[],"operation":"add","projectIds":[]}`, "must not be empty"},
+		{"invalid operation", `{"mediaType":"photo","assetIds":["00000000-0000-4000-8000-000000000001"],"operation":"merge","projectIds":[]}`, "operation must be"},
+		{"self relation", `{"mediaType":"photo","assetIds":["00000000-0000-4000-8000-000000000001"],"operation":"add","photoRelation":{"direction":"children_of","otherPhotoId":"00000000-0000-4000-8000-000000000001"}}`, "cannot be related to itself"},
+		{"media derivation", `{"mediaType":"video","assetIds":["00000000-0000-4000-8000-000000000001"],"operation":"add","photoRelation":{"direction":"children_of","otherPhotoId":"00000000-0000-4000-8000-000000000002"}}`, "only available for photos"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/api/v1/relations/bulk", strings.NewReader(test.body))
+			request.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+			relationTestServer().ServeHTTP(response, request)
+			if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), test.want) {
+				t.Fatalf("expected validation %q, got %d %s", test.want, response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
 func TestInvalidLocationFilter(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/photos?has_location=maybe", nil)
 	response := httptest.NewRecorder()
@@ -99,7 +215,7 @@ func TestServesEmbeddedApp(t *testing.T) {
 	if !strings.Contains(response.Body.String(), "ApoFocus") {
 		t.Fatal("embedded app title was not served")
 	}
-	for _, marker := range []string{`role="tablist"`, `data-media="photos"`, `data-media="videos"`, `data-media="audios"`, `class="audio-artwork detail-audio-artwork"`} {
+	for _, marker := range []string{`role="tablist"`, `data-media="photos"`, `data-media="videos"`, `data-media="audios"`, `class="audio-artwork detail-audio-artwork"`, `id="detail-relations"`, `id="media-detail-relations"`, `data-relation-options="projects"`, `data-relation-options="stories"`, `id="bulk-relations-dialog"`, `id="select-visible"`} {
 		if !strings.Contains(response.Body.String(), marker) {
 			t.Fatalf("embedded app is missing media tab marker %q", marker)
 		}

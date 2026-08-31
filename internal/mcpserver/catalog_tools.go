@@ -61,43 +61,50 @@ type SimilarMediaInput struct {
 }
 
 type UpdatePhotoInput struct {
-	PhotoID       string            `json:"photo_id" jsonschema:"ApoFocus photo UUID"`
-	Title         *string           `json:"title,omitempty" jsonschema:"photographer-authored title"`
-	Project       *string           `json:"project,omitempty" jsonschema:"project or story; an empty value clears it"`
-	TakenAt       *string           `json:"taken_at,omitempty" jsonschema:"RFC3339 capture date and time"`
-	Tags          *[]string         `json:"tags,omitempty" jsonschema:"complete photographer-authored tag list"`
-	Camera        *string           `json:"camera,omitempty" jsonschema:"corrected camera model"`
-	Lens          *string           `json:"lens,omitempty" jsonschema:"corrected lens model"`
-	Aperture      *string           `json:"aperture,omitempty"`
-	ShutterSpeed  *string           `json:"shutter_speed,omitempty"`
-	ISO           *int              `json:"iso,omitempty"`
-	FocalLength   *string           `json:"focal_length,omitempty"`
-	Location      *catalog.Location `json:"location,omitempty" jsonschema:"corrected location and coordinates"`
-	ClearLocation bool              `json:"clear_location,omitempty"`
-	Description   *string           `json:"description,omitempty"`
-	Copyright     *string           `json:"copyright,omitempty"`
-	Rating        *int              `json:"rating,omitempty" jsonschema:"rating from 0 to 5"`
-	Favorite      *bool             `json:"favorite,omitempty"`
-	UserMetadata  *map[string]any   `json:"user_metadata,omitempty"`
-	Revision      *int64            `json:"revision" jsonschema:"required revision returned by get_photo; prevents overwriting concurrent edits"`
-	Confirmed     bool              `json:"confirmed" jsonschema:"must be true after the user approves this catalog edit"`
+	PhotoID       string                          `json:"photo_id" jsonschema:"ApoFocus photo UUID"`
+	Title         *string                         `json:"title,omitempty" jsonschema:"photographer-authored title"`
+	Project       *string                         `json:"project,omitempty" jsonschema:"project or story; an empty value clears it"`
+	TakenAt       *string                         `json:"taken_at,omitempty" jsonschema:"RFC3339 capture date and time"`
+	Tags          *[]string                       `json:"tags,omitempty" jsonschema:"complete photographer-authored tag list"`
+	Camera        *string                         `json:"camera,omitempty" jsonschema:"corrected camera model"`
+	Lens          *string                         `json:"lens,omitempty" jsonschema:"corrected lens model"`
+	Aperture      *string                         `json:"aperture,omitempty"`
+	ShutterSpeed  *string                         `json:"shutter_speed,omitempty"`
+	ISO           *int                            `json:"iso,omitempty"`
+	FocalLength   *string                         `json:"focal_length,omitempty"`
+	Location      *catalog.Location               `json:"location,omitempty" jsonschema:"corrected location and coordinates"`
+	ClearLocation bool                            `json:"clear_location,omitempty"`
+	Description   *string                         `json:"description,omitempty"`
+	Copyright     *string                         `json:"copyright,omitempty"`
+	Rating        *int                            `json:"rating,omitempty" jsonschema:"rating from 0 to 5"`
+	Favorite      *bool                           `json:"favorite,omitempty"`
+	UserMetadata  *map[string]any                 `json:"user_metadata,omitempty"`
+	ProjectIDs    *[]string                       `json:"project_ids,omitempty" jsonschema:"complete project UUID list; replaces current project relationships"`
+	StoryIDs      *[]string                       `json:"story_ids,omitempty" jsonschema:"complete story UUID list; replaces current story relationships"`
+	Parents       *[]catalog.PhotoDerivationInput `json:"parents,omitempty" jsonschema:"complete parent photo relation list"`
+	Children      *[]catalog.PhotoDerivationInput `json:"children,omitempty" jsonschema:"complete derived child photo relation list"`
+	Revision      *int64                          `json:"revision" jsonschema:"required revision returned by get_photo; prevents overwriting concurrent edits"`
+	Confirmed     bool                            `json:"confirmed" jsonschema:"must be true after the user approves this catalog edit"`
 }
 
 type UpdateMediaInput struct {
-	MediaType    string          `json:"media_type" jsonschema:"video or audio"`
-	AssetID      string          `json:"asset_id" jsonschema:"ApoFocus media asset UUID"`
-	Title        *string         `json:"title,omitempty"`
-	Project      *string         `json:"project,omitempty"`
-	RecordedAt   *string         `json:"recorded_at,omitempty" jsonschema:"RFC3339 recording date and time"`
-	Tags         *[]string       `json:"tags,omitempty"`
-	Description  *string         `json:"description,omitempty"`
-	Copyright    *string         `json:"copyright,omitempty"`
-	Rating       *int            `json:"rating,omitempty" jsonschema:"rating from 0 to 5"`
-	Favorite     *bool           `json:"favorite,omitempty"`
-	Transcript   *string         `json:"transcript,omitempty" jsonschema:"photographer-corrected transcript"`
-	UserMetadata *map[string]any `json:"user_metadata,omitempty"`
-	Revision     *int64          `json:"revision" jsonschema:"required revision returned by get_media"`
-	Confirmed    bool            `json:"confirmed"`
+	MediaType       string          `json:"media_type" jsonschema:"video or audio"`
+	AssetID         string          `json:"asset_id" jsonschema:"ApoFocus media asset UUID"`
+	Title           *string         `json:"title,omitempty"`
+	Project         *string         `json:"project,omitempty"`
+	RecordedAt      *string         `json:"recorded_at,omitempty" jsonschema:"RFC3339 recording date and time"`
+	Tags            *[]string       `json:"tags,omitempty"`
+	Description     *string         `json:"description,omitempty"`
+	Copyright       *string         `json:"copyright,omitempty"`
+	Rating          *int            `json:"rating,omitempty" jsonschema:"rating from 0 to 5"`
+	Favorite        *bool           `json:"favorite,omitempty"`
+	Transcript      *string         `json:"transcript,omitempty" jsonschema:"photographer-corrected transcript"`
+	UserMetadata    *map[string]any `json:"user_metadata,omitempty"`
+	ProjectIDs      *[]string       `json:"project_ids,omitempty" jsonschema:"complete project UUID list; replaces current project relationships"`
+	StoryIDs        *[]string       `json:"story_ids,omitempty" jsonschema:"complete story UUID list; replaces current story relationships"`
+	RelatedAssetIDs *[]string       `json:"related_asset_ids,omitempty" jsonschema:"complete related audio IDs for video, or video IDs for audio"`
+	Revision        *int64          `json:"revision" jsonschema:"required revision returned by get_media"`
+	Confirmed       bool            `json:"confirmed"`
 }
 
 func addPhotoCatalogTools(server *mcp.Server, store catalog.Store) {
@@ -143,7 +150,7 @@ func addPhotoCatalogTools(server *mcp.Server, store catalog.Store) {
 			}
 			takenAt = &parsed
 		}
-		photo, err := store.Update(ctx, strings.TrimSpace(input.PhotoID), catalog.PhotoUpdate{Title: input.Title, Project: input.Project, TakenAt: takenAt, Tags: input.Tags, Camera: input.Camera, Lens: input.Lens, Aperture: input.Aperture, ShutterSpeed: input.ShutterSpeed, ISO: input.ISO, FocalLength: input.FocalLength, Location: input.Location, ClearLocation: input.ClearLocation, Description: input.Description, Copyright: input.Copyright, Rating: input.Rating, Favorite: input.Favorite, UserMetadata: input.UserMetadata, Revision: input.Revision})
+		photo, err := store.Update(ctx, strings.TrimSpace(input.PhotoID), catalog.PhotoUpdate{Title: input.Title, Project: input.Project, TakenAt: takenAt, Tags: input.Tags, Camera: input.Camera, Lens: input.Lens, Aperture: input.Aperture, ShutterSpeed: input.ShutterSpeed, ISO: input.ISO, FocalLength: input.FocalLength, Location: input.Location, ClearLocation: input.ClearLocation, Description: input.Description, Copyright: input.Copyright, Rating: input.Rating, Favorite: input.Favorite, UserMetadata: input.UserMetadata, ProjectIDs: input.ProjectIDs, StoryIDs: input.StoryIDs, Parents: input.Parents, Children: input.Children, Revision: input.Revision})
 		return nil, photo, err
 	})
 }
@@ -210,7 +217,7 @@ func addMediaCatalogTools(server *mcp.Server, store catalog.MediaStore) {
 			}
 			recordedAt = &parsed
 		}
-		asset, err := store.UpdateMedia(ctx, mediaType, strings.TrimSpace(input.AssetID), catalog.MediaUpdate{Title: input.Title, Project: input.Project, RecordedAt: recordedAt, Tags: input.Tags, Description: input.Description, Copyright: input.Copyright, Rating: input.Rating, Favorite: input.Favorite, Transcript: input.Transcript, UserMetadata: input.UserMetadata, Revision: input.Revision})
+		asset, err := store.UpdateMedia(ctx, mediaType, strings.TrimSpace(input.AssetID), catalog.MediaUpdate{Title: input.Title, Project: input.Project, RecordedAt: recordedAt, Tags: input.Tags, Description: input.Description, Copyright: input.Copyright, Rating: input.Rating, Favorite: input.Favorite, Transcript: input.Transcript, UserMetadata: input.UserMetadata, ProjectIDs: input.ProjectIDs, StoryIDs: input.StoryIDs, RelatedAssetIDs: input.RelatedAssetIDs, Revision: input.Revision})
 		return nil, asset, err
 	})
 }

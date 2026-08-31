@@ -101,7 +101,7 @@ func main() {
 		}()
 	}
 	server := mcpserver.NewWithOptions(mcpserver.Options{
-		PhotoImporter: manager, MediaImporter: mediaManager, Photos: photoStore, Media: photoStore,
+		PhotoImporter: manager, MediaImporter: mediaManager, Photos: photoStore, Media: photoStore, Relations: photoStore,
 		Folders: folderRepository, BatchJobs: batchJobs, Maintenance: maintenanceManager,
 		InitJobs:    initJobs,
 		Backup:      backupOperations,

@@ -42,6 +42,7 @@ type Options struct {
 	MediaImporter MediaImporter
 	Photos        catalog.Store
 	Media         catalog.MediaStore
+	Relations     catalog.RelationStore
 	Folders       folders.Repository
 	BatchJobs     BatchJobs
 	InitJobs      InitJobs

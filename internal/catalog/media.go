@@ -37,20 +37,24 @@ type MediaAsset struct {
 	HashStatus     string         `json:"hashStatus"`
 	AIStatus       string         `json:"aiStatus"`
 	DeepIndexState string         `json:"deepIndexStatus"`
+	Relations      MediaRelations `json:"relations"`
 }
 
 type MediaUpdate struct {
-	Title        *string         `json:"title,omitempty"`
-	Project      *string         `json:"project,omitempty"`
-	RecordedAt   *time.Time      `json:"recordedAt,omitempty"`
-	Tags         *[]string       `json:"tags,omitempty"`
-	Description  *string         `json:"description,omitempty"`
-	Copyright    *string         `json:"copyright,omitempty"`
-	Rating       *int            `json:"rating,omitempty"`
-	Favorite     *bool           `json:"favorite,omitempty"`
-	Transcript   *string         `json:"transcript,omitempty"`
-	UserMetadata *map[string]any `json:"userMetadata,omitempty"`
-	Revision     *int64          `json:"revision"`
+	Title           *string         `json:"title,omitempty"`
+	Project         *string         `json:"project,omitempty"`
+	RecordedAt      *time.Time      `json:"recordedAt,omitempty"`
+	Tags            *[]string       `json:"tags,omitempty"`
+	Description     *string         `json:"description,omitempty"`
+	Copyright       *string         `json:"copyright,omitempty"`
+	Rating          *int            `json:"rating,omitempty"`
+	Favorite        *bool           `json:"favorite,omitempty"`
+	Transcript      *string         `json:"transcript,omitempty"`
+	UserMetadata    *map[string]any `json:"userMetadata,omitempty"`
+	ProjectIDs      *[]string       `json:"projectIds,omitempty"`
+	StoryIDs        *[]string       `json:"storyIds,omitempty"`
+	RelatedAssetIDs *[]string       `json:"relatedAssetIds,omitempty"`
+	Revision        *int64          `json:"revision"`
 }
 
 type MediaSegment struct {

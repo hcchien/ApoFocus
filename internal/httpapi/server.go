@@ -27,6 +27,7 @@ type Server struct {
 	folders   folders.Repository
 	batchJobs *batch.Service
 	media     catalog.MediaStore
+	relations catalog.RelationStore
 	initJobs  *initjob.Service
 }
 
@@ -35,6 +36,7 @@ type Options struct {
 	Folders   folders.Repository
 	BatchJobs *batch.Service
 	Media     catalog.MediaStore
+	Relations catalog.RelationStore
 	InitJobs  *initjob.Service
 }
 
@@ -47,7 +49,10 @@ func NewWithMedia(store catalog.Store, logger *slog.Logger, mediaRoot string) ht
 }
 
 func NewWithOptions(store catalog.Store, logger *slog.Logger, options Options) http.Handler {
-	server := &Server{store: store, logger: logger, router: http.NewServeMux(), mediaRoot: options.MediaRoot, folders: options.Folders, batchJobs: options.BatchJobs, media: options.Media, initJobs: options.InitJobs}
+	if options.Relations == nil {
+		options.Relations, _ = store.(catalog.RelationStore)
+	}
+	server := &Server{store: store, logger: logger, router: http.NewServeMux(), mediaRoot: options.MediaRoot, folders: options.Folders, batchJobs: options.BatchJobs, media: options.Media, relations: options.Relations, initJobs: options.InitJobs}
 	server.routes()
 	return server.recoverer(server.accessLog(server.securityHeaders(server.router)))
 }
@@ -62,6 +67,15 @@ func (s *Server) routes() {
 	s.router.HandleFunc("PATCH /api/v1/photos/{id}", s.updatePhoto)
 	s.router.HandleFunc("GET /api/v1/photos/{id}/similar", s.similarPhotos)
 	s.router.HandleFunc("GET /api/v1/facets", s.getFacets)
+	if s.relations != nil {
+		s.router.HandleFunc("GET /api/v1/relations/catalog", s.listRelationCatalog)
+		s.router.HandleFunc("POST /api/v1/relations/bulk", s.bulkUpdateRelations)
+		s.router.HandleFunc("POST /api/v1/projects", s.createProject)
+		s.router.HandleFunc("PATCH /api/v1/projects/{id}", s.updateProjectDescription)
+		s.router.HandleFunc("PUT /api/v1/projects/{id}/stories", s.replaceProjectStories)
+		s.router.HandleFunc("POST /api/v1/stories", s.createStory)
+		s.router.HandleFunc("PATCH /api/v1/stories/{id}", s.updateStoryDescription)
+	}
 	s.router.HandleFunc("GET /api/v1/videos", func(w http.ResponseWriter, r *http.Request) { s.listMedia(w, r, "video") })
 	s.router.HandleFunc("GET /api/v1/videos/facets", func(w http.ResponseWriter, r *http.Request) { s.getMediaFacets(w, r, "video") })
 	s.router.HandleFunc("GET /api/v1/videos/{id}", func(w http.ResponseWriter, r *http.Request) { s.getMedia(w, r, "video") })

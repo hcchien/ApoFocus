@@ -41,6 +41,7 @@ func main() {
 	options := httpapi.Options{MediaRoot: mediaRoot}
 	if db != nil {
 		options.Media = store.(catalog.MediaStore)
+		options.Relations = store.(catalog.RelationStore)
 		options.Folders = folders.NewPostgresRepository(db)
 		storageRootID := ""
 		libraryOnline := false
