@@ -108,6 +108,7 @@
           <strong id="bulk-selected-count">已選擇 0 筆</strong>
           <span id="bulk-selection-message" role="status"></span>
           <button id="clear-selection" type="button" data-i18n="bulkRelations.clear">清除勾選</button>
+          <button class="deep-analysis-open" id="start-deep-analysis" type="button" disabled data-i18n="deepAnalysis.action">使用大型語言深度分析</button>
           <button class="bulk-update-open" id="open-bulk-relations" type="button" disabled data-i18n="bulkRelations.open">批次修改關聯</button>
         </div>
         <div class="photo-grid" id="photo-grid" aria-live="polite"></div>
@@ -146,6 +147,7 @@
           <p class="edit-message" data-edit-message></p><button class="batch-submit wide" type="submit" data-i18n="edit.save">儲存修改</button>
         </form>
         <button class="similar-button" id="similar-button"><svg viewBox="0 0 24 24"><circle cx="9" cy="9" r="5"/><circle cx="16" cy="15" r="5"/><path d="m4 20 3.5-3.5"/></svg><span><strong data-i18n="similar.photoAction">尋找視覺相似照片</strong><small data-i18n="similar.photoHint">使用 pgvector 計算影像距離</small></span><i>→</i></button>
+        <div class="detail-section deep-analysis-section"><div class="deep-analysis-head"><h3 data-i18n="deepAnalysis.heading">照片內容分析</h3><button id="detail-deep-analysis" type="button" data-i18n="deepAnalysis.action">使用大型語言深度分析</button></div><p class="deep-analysis-note" data-i18n="deepAnalysis.note">分析結果只會作為建議，不會改動人工輸入的資料。</p><div id="detail-deep-analysis-result" class="deep-analysis-result" aria-live="polite"></div></div>
         <div class="detail-section"><h3 data-i18n="detail.photoInfo">拍攝資訊</h3><dl id="detail-exif"></dl></div>
         <div class="detail-section" id="detail-location-section"><h3 data-i18n="detail.location">地點</h3><div class="location-card"><svg viewBox="0 0 24 24"><path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg><span><strong id="detail-location"></strong><small id="detail-coordinates"></small></span></div></div>
         <div class="detail-section"><h3 data-i18n="detail.tags">標籤</h3><div class="detail-tags" id="detail-tags"></div></div>
@@ -241,7 +243,7 @@
     </section>
   </dialog>
 
-  <script src="/i18n.js" defer></script>
-  <script src="/app.js" defer></script>
+  <script src="/i18n.js?v=8" defer></script>
+  <script src="/app.js?v=8" defer></script>
 </body>
 </html>

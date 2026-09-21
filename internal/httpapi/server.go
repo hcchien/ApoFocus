@@ -14,30 +14,33 @@ import (
 
 	"github.com/hcchien/apofocus/internal/batch"
 	"github.com/hcchien/apofocus/internal/catalog"
+	"github.com/hcchien/apofocus/internal/deepanalysis"
 	"github.com/hcchien/apofocus/internal/folders"
 	"github.com/hcchien/apofocus/internal/initjob"
 	webassets "github.com/hcchien/apofocus/web"
 )
 
 type Server struct {
-	store     catalog.Store
-	logger    *slog.Logger
-	router    *http.ServeMux
-	mediaRoot string
-	folders   folders.Repository
-	batchJobs *batch.Service
-	media     catalog.MediaStore
-	relations catalog.RelationStore
-	initJobs  *initjob.Service
+	store        catalog.Store
+	logger       *slog.Logger
+	router       *http.ServeMux
+	mediaRoot    string
+	folders      folders.Repository
+	batchJobs    *batch.Service
+	media        catalog.MediaStore
+	relations    catalog.RelationStore
+	initJobs     *initjob.Service
+	deepAnalysis *deepanalysis.Service
 }
 
 type Options struct {
-	MediaRoot string
-	Folders   folders.Repository
-	BatchJobs *batch.Service
-	Media     catalog.MediaStore
-	Relations catalog.RelationStore
-	InitJobs  *initjob.Service
+	MediaRoot    string
+	Folders      folders.Repository
+	BatchJobs    *batch.Service
+	Media        catalog.MediaStore
+	Relations    catalog.RelationStore
+	InitJobs     *initjob.Service
+	DeepAnalysis *deepanalysis.Service
 }
 
 func New(store catalog.Store, logger *slog.Logger) http.Handler {
@@ -52,7 +55,7 @@ func NewWithOptions(store catalog.Store, logger *slog.Logger, options Options) h
 	if options.Relations == nil {
 		options.Relations, _ = store.(catalog.RelationStore)
 	}
-	server := &Server{store: store, logger: logger, router: http.NewServeMux(), mediaRoot: options.MediaRoot, folders: options.Folders, batchJobs: options.BatchJobs, media: options.Media, relations: options.Relations, initJobs: options.InitJobs}
+	server := &Server{store: store, logger: logger, router: http.NewServeMux(), mediaRoot: options.MediaRoot, folders: options.Folders, batchJobs: options.BatchJobs, media: options.Media, relations: options.Relations, initJobs: options.InitJobs, deepAnalysis: options.DeepAnalysis}
 	server.routes()
 	return server.recoverer(server.accessLog(server.securityHeaders(server.router)))
 }
@@ -66,6 +69,13 @@ func (s *Server) routes() {
 	s.router.HandleFunc("GET /api/v1/photos/{id}/file", s.servePhotoFile)
 	s.router.HandleFunc("PATCH /api/v1/photos/{id}", s.updatePhoto)
 	s.router.HandleFunc("GET /api/v1/photos/{id}/similar", s.similarPhotos)
+	if s.deepAnalysis != nil {
+		s.router.HandleFunc("GET /api/v1/photos/{id}/deep-analysis", s.getPhotoDeepAnalysis)
+		s.router.HandleFunc("POST /api/v1/deep-analysis-jobs", s.createDeepAnalysisJob)
+		s.router.HandleFunc("GET /api/v1/deep-analysis-jobs/{id}", s.getDeepAnalysisJob)
+		s.router.HandleFunc("GET /api/v1/deep-analysis-jobs/{id}/items", s.getDeepAnalysisItems)
+		s.router.HandleFunc("POST /api/v1/deep-analysis-jobs/{id}/cancel", s.cancelDeepAnalysisJob)
+	}
 	s.router.HandleFunc("GET /api/v1/facets", s.getFacets)
 	if s.relations != nil {
 		s.router.HandleFunc("GET /api/v1/relations/catalog", s.listRelationCatalog)

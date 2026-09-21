@@ -6,6 +6,7 @@ import (
 	"github.com/hcchien/apofocus/internal/backup"
 	"github.com/hcchien/apofocus/internal/batch"
 	"github.com/hcchien/apofocus/internal/catalog"
+	"github.com/hcchien/apofocus/internal/deepanalysis"
 	"github.com/hcchien/apofocus/internal/folders"
 	"github.com/hcchien/apofocus/internal/ingest"
 	"github.com/hcchien/apofocus/internal/initjob"
@@ -37,6 +38,14 @@ type InitJobs interface {
 	Cancel(context.Context, string) error
 }
 
+type DeepAnalysisJobs interface {
+	Create(context.Context, deepanalysis.CreateInput) (deepanalysis.Job, error)
+	Get(context.Context, string) (deepanalysis.Job, error)
+	Items(context.Context, string, int) ([]deepanalysis.Item, error)
+	LatestForPhoto(context.Context, string) (deepanalysis.PhotoAnalysis, error)
+	Cancel(context.Context, string) error
+}
+
 type Options struct {
 	PhotoImporter *ingest.Manager
 	MediaImporter MediaImporter
@@ -46,6 +55,7 @@ type Options struct {
 	Folders       folders.Repository
 	BatchJobs     BatchJobs
 	InitJobs      InitJobs
+	DeepAnalysis  DeepAnalysisJobs
 	Maintenance   maintenance.Checker
 	Backup        backup.Operations
 	ImportRoots   []string

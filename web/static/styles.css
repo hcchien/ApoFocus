@@ -136,6 +136,8 @@ h1 { margin: 0; font-family: "Iowan Old Style", "Noto Serif TC", Georgia, serif;
 .bulk-selection-bar #bulk-selection-message { flex: 1; color: var(--accent); }
 .bulk-selection-bar .bulk-update-open { background: var(--ink); color: white; }
 .bulk-selection-bar .bulk-update-open:disabled { opacity: .35; cursor: default; }
+.bulk-selection-bar .deep-analysis-open { background: var(--accent); color: white; }
+.bulk-selection-bar .deep-analysis-open:disabled { opacity: .35; cursor: default; }
 .photo-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-auto-rows: 1px; gap: 13px; }
 .photo-card { grid-row: span 16; position: relative; border: 0; border-radius: 4px; padding: 0; background: #d8d7cf; overflow: hidden; cursor: zoom-in; text-align: left; box-shadow: 0 1px 0 rgba(0,0,0,.03); }
 .photo-card.portrait { grid-row: span 25; }
@@ -252,6 +254,13 @@ dialog::backdrop { background: rgba(20,20,17,.72); backdrop-filter: blur(5px); }
 .metadata-edit-form .check-row input { width:auto; }
 .metadata-edit-form .batch-submit { grid-column:1/-1; }
 .edit-message { grid-column:1/-1;margin:0;color:var(--accent);font-size:9px; }
+.deep-analysis-head { display:flex;align-items:center;justify-content:space-between;gap:10px; }
+.deep-analysis-head h3 { margin:0; }
+.deep-analysis-head button { border:0;border-radius:6px;padding:7px 9px;background:var(--accent);color:white;font-size:9px;cursor:pointer; }
+.deep-analysis-head button:disabled { opacity:.5;cursor:default; }
+.deep-analysis-note,.deep-analysis-result p { color:var(--muted);font-size:9px;line-height:1.6; }
+.deep-analysis-result .deep-analysis-caption { color:var(--ink);font-size:11px; }
+.deep-analysis-result small { display:block;margin-top:8px;color:var(--faint);font-size:8px; }
 .similar-dialog { width: min(920px, calc(100vw - 52px)); max-height: min(760px, calc(100dvh - 52px)); border-radius: 9px; padding: 30px; overflow: auto; }
 .similar-head { display: flex; justify-content: space-between; align-items: flex-start; }
 .similar-head p:last-child { margin: 7px 0 0; color: var(--muted); font-size: 11px; }

@@ -1,4 +1,4 @@
-.PHONY: run test build-mcp build-batch build-backup build-worker build-init run-mcp migrate-up migrate-down embedding-install embedding-serve embedding-serve-offline embedding-index embedding-benchmark install-macos
+.PHONY: run test build-mcp build-batch build-backup build-worker build-init run-mcp migrate-up migrate-down embedding-install embedding-serve embedding-serve-offline embedding-index embedding-benchmark deep-analysis-install deep-analysis-serve install-macos
 
 install-macos:
 	bash scripts/install_macos.sh
@@ -33,10 +33,10 @@ run-mcp:
 	go run ./cmd/apofocus-mcp
 
 migrate-up:
-	psql "$(DATABASE_URL)" -v ON_ERROR_STOP=1 -f migrations/000001_init.sql -f migrations/000002_ingest.sql -f migrations/000003_folders_and_batch.sql -f migrations/000004_multimedia.sql -f migrations/000005_storage_tracking.sql -f migrations/000006_editing_and_init.sql -f migrations/000007_projects_stories_relations.sql
+	psql "$(DATABASE_URL)" -v ON_ERROR_STOP=1 -f migrations/000001_init.sql -f migrations/000002_ingest.sql -f migrations/000003_folders_and_batch.sql -f migrations/000004_multimedia.sql -f migrations/000005_storage_tracking.sql -f migrations/000006_editing_and_init.sql -f migrations/000007_projects_stories_relations.sql -f migrations/000008_deep_analysis.sql
 
 migrate-down:
-	psql "$(DATABASE_URL)" -v ON_ERROR_STOP=1 -f migrations/000007_down.sql -f migrations/000006_down.sql -f migrations/000005_down.sql -f migrations/000004_down.sql -f migrations/000003_down.sql -f migrations/000001_down.sql
+	psql "$(DATABASE_URL)" -v ON_ERROR_STOP=1 -f migrations/000008_down.sql -f migrations/000007_down.sql -f migrations/000006_down.sql -f migrations/000005_down.sql -f migrations/000004_down.sql -f migrations/000003_down.sql -f migrations/000001_down.sql
 
 embedding-install:
 	python3 -m venv .venv
@@ -55,3 +55,9 @@ embedding-benchmark:
 	@test -n "$(BENCHMARK_SOURCE)" || (echo "BENCHMARK_SOURCE is required" && exit 2)
 	@test -n "$(BENCHMARK_OUTPUT)" || (echo "BENCHMARK_OUTPUT is required and must be inside THUMBNAIL_ROOTS" && exit 2)
 	.venv/bin/python services/embedding/benchmark.py --source "$(BENCHMARK_SOURCE)" --output-dir "$(BENCHMARK_OUTPUT)" $(BENCHMARK_ARGS)
+
+deep-analysis-install:
+	bash scripts/install_deep_analysis.sh --state-dir .deep-analysis
+
+deep-analysis-serve:
+	.deep-analysis/deep-analysis-venv/bin/python -m uvicorn app:app --app-dir .deep-analysis/services/deep-analysis --host 127.0.0.1 --port 8091

@@ -17,6 +17,7 @@ import (
 
 	"github.com/hcchien/apofocus/internal/batch"
 	"github.com/hcchien/apofocus/internal/catalog"
+	"github.com/hcchien/apofocus/internal/deepanalysis"
 	"github.com/hcchien/apofocus/internal/folders"
 	"github.com/hcchien/apofocus/internal/httpapi"
 	"github.com/hcchien/apofocus/internal/ingest"
@@ -43,6 +44,8 @@ func main() {
 		options.Media = store.(catalog.MediaStore)
 		options.Relations = store.(catalog.RelationStore)
 		options.Folders = folders.NewPostgresRepository(db)
+		deepRepository := deepanalysis.NewPostgresRepository(db)
+		options.DeepAnalysis = deepanalysis.NewService(deepRepository, envOr("DEEP_ANALYSIS_MODEL", deepanalysis.DefaultModel), envOr("DEEP_ANALYSIS_PROMPT_VERSION", deepanalysis.DefaultPromptVersion))
 		storageRootID := ""
 		libraryOnline := false
 		if mediaRoot != "" {
@@ -90,6 +93,13 @@ func main() {
 				}
 			}()
 			logger.Info("local sequential batch worker enabled")
+			deepWorker := deepanalysis.NewWorker(deepRepository, deepanalysis.NewHTTPAnalyzer(envOr("DEEP_ANALYSIS_SERVICE_URL", "http://127.0.0.1:8091")))
+			go func() {
+				if workerErr := deepWorker.Run(ctx); workerErr != nil && !errors.Is(workerErr, context.Canceled) {
+					logger.Error("deep analysis worker stopped", "error", workerErr)
+				}
+			}()
+			logger.Info("deep analysis queue worker enabled")
 		}
 	}
 	handler := httpapi.NewWithOptions(store, logger, options)

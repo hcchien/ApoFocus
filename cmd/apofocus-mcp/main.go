@@ -16,6 +16,7 @@ import (
 	"github.com/hcchien/apofocus/internal/backup"
 	"github.com/hcchien/apofocus/internal/batch"
 	"github.com/hcchien/apofocus/internal/catalog"
+	"github.com/hcchien/apofocus/internal/deepanalysis"
 	"github.com/hcchien/apofocus/internal/folders"
 	"github.com/hcchien/apofocus/internal/ingest"
 	"github.com/hcchien/apofocus/internal/initjob"
@@ -85,6 +86,7 @@ func main() {
 	}
 	batchJobs := batch.NewService(batchRepository, manager)
 	initJobs := initjob.NewService(initjob.NewPostgresRepository(db), importRoots)
+	deepJobs := deepanalysis.NewService(deepanalysis.NewPostgresRepository(db), envOr("DEEP_ANALYSIS_MODEL", deepanalysis.DefaultModel), envOr("DEEP_ANALYSIS_PROMPT_VERSION", deepanalysis.DefaultPromptVersion))
 	maintenanceManager := maintenance.NewManager(db, batchJobs, libraryRoot, importRoots, envOr("APOFOCUS_APP_URL", "http://127.0.0.1:8080"), embeddingURL)
 	serverContext, stop := context.WithCancel(context.Background())
 	defer stop()
@@ -103,9 +105,10 @@ func main() {
 	server := mcpserver.NewWithOptions(mcpserver.Options{
 		PhotoImporter: manager, MediaImporter: mediaManager, Photos: photoStore, Media: photoStore, Relations: photoStore,
 		Folders: folderRepository, BatchJobs: batchJobs, Maintenance: maintenanceManager,
-		InitJobs:    initJobs,
-		Backup:      backupOperations,
-		ImportRoots: importRoots, LibraryRoot: libraryRoot,
+		InitJobs:     initJobs,
+		DeepAnalysis: deepJobs,
+		Backup:       backupOperations,
+		ImportRoots:  importRoots, LibraryRoot: libraryRoot,
 	})
 	if err := server.Run(serverContext, &mcp.StdioTransport{}); err != nil {
 		logger.Error("run MCP server", "error", err)

@@ -46,7 +46,7 @@ func New(manager *ingest.Manager, importRoots []string, libraryRoot string) *mcp
 }
 
 func NewWithOptions(options Options) *mcp.Server {
-	server := mcp.NewServer(&mcp.Implementation{Name: "apofocus", Version: "v0.7.0"}, nil)
+	server := mcp.NewServer(&mcp.Implementation{Name: "apofocus", Version: "v0.8.0"}, nil)
 	addPhotoImportTools(server, options.PhotoImporter, options.ImportRoots, options.LibraryRoot)
 	if options.Photos != nil {
 		addPhotoCatalogTools(server, options.Photos)
@@ -68,6 +68,9 @@ func NewWithOptions(options Options) *mcp.Server {
 	}
 	if options.InitJobs != nil {
 		addInitTools(server, options.InitJobs)
+	}
+	if options.DeepAnalysis != nil {
+		addDeepAnalysisTools(server, options.DeepAnalysis)
 	}
 	if options.Maintenance != nil {
 		addMaintenanceTools(server, options.Maintenance, options.BatchJobs)

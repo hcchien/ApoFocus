@@ -110,10 +110,12 @@ function bindEvents() {
   $("#select-visible").addEventListener("change", toggleVisibleSelection);
   $("#select-search-results").addEventListener("click", selectSearchResults);
   $("#clear-selection").addEventListener("click", clearBulkSelection);
+  $("#start-deep-analysis").addEventListener("click", startBulkDeepAnalysis);
   $("#open-bulk-relations").addEventListener("click", openBulkRelations);
   $("#bulk-relations-close").addEventListener("click", () => bulkRelationsDialog.close());
   $("#bulk-relations-form").addEventListener("submit", applyBulkRelations);
   $("#bulk-relations-form").elements.operation.addEventListener("change", syncBulkRelationForm);
+  $("#detail-deep-analysis").addEventListener("click", startDetailDeepAnalysis);
   bulkRelationsDialog.addEventListener("click", (event) => { if (event.target === bulkRelationsDialog) bulkRelationsDialog.close(); });
   window.addEventListener("apofocus:localechange", refreshLocalizedUI);
 }
@@ -367,6 +369,9 @@ function renderBulkSelection() {
   checkbox.indeterminate = visibleSelected > 0 && visibleSelected < visibleIDs.length;
   $("#bulk-selected-count").textContent = t("bulkRelations.selected", { count: formatNumber(selected.size) });
   $("#open-bulk-relations").disabled = selected.size === 0;
+  const deepButton = $("#start-deep-analysis");
+  deepButton.hidden = state.mediaType !== "photos";
+  deepButton.disabled = state.mediaType !== "photos" || selected.size === 0;
 }
 
 function toggleVisibleSelection(event) {
@@ -593,6 +598,7 @@ async function openDetail(id) {
   $("#detail-file").innerHTML = dlItems([[t("field.format"), photo.fileType], [t("field.dimensions"), photo.dimensions], [t("field.fileSize"), photo.fileSize], [t("field.year"), photo.year], [t("field.originalStatus"), availabilityLabel(photo.availabilityStatus, true)], [t("field.thumbnailStatus"), availabilityLabel(photo.thumbnailStatus, true)]]);
   $("#detail-tags").innerHTML = photo.tags.map((tag) => `<span># ${escapeHTML(tag)}</span>`).join("");
   $("#detail-relations").innerHTML = renderPhotoRelations(photo.relations || {});
+  loadPhotoDeepAnalysis(photo.id);
   $("#detail-location-section").hidden = !photo.location;
   if (photo.location) {
     $("#detail-location").textContent = photo.location.name;
@@ -601,6 +607,111 @@ async function openDetail(id) {
   const position = state.photos.findIndex((item) => item.id === photo.id);
   $("#detail-position").textContent = `${position + 1} / ${state.photos.length}`;
   if (!dialog.open) dialog.showModal();
+}
+
+async function startBulkDeepAnalysis() {
+  if (state.mediaType !== "photos") return;
+  const ids = [...state.bulkSelections.photos];
+  if (!ids.length) return;
+  const button = $("#start-deep-analysis");
+  button.disabled = true;
+  $("#bulk-selection-message").textContent = t("deepAnalysis.queueing");
+  try {
+    const job = await createDeepAnalysisJob(ids, false);
+    $("#bulk-selection-message").textContent = job.selectedCount ? t("deepAnalysis.queued", { count: formatNumber(job.selectedCount) }) : t("deepAnalysis.alreadyCurrent");
+    if (job.selectedCount) pollDeepAnalysisJob(job.id, (next) => {
+      $("#bulk-selection-message").textContent = deepAnalysisJobText(next);
+    });
+  } catch (error) {
+    $("#bulk-selection-message").textContent = error.message || t("deepAnalysis.failed");
+  } finally {
+    renderBulkSelection();
+  }
+}
+
+async function startDetailDeepAnalysis() {
+  if (!state.selected) return;
+  const button = $("#detail-deep-analysis");
+  const force = button.dataset.completed === "true";
+  button.disabled = true;
+  $("#detail-deep-analysis-result").innerHTML = "<p>" + escapeHTML(t("deepAnalysis.queueing")) + "</p>";
+  try {
+    const job = await createDeepAnalysisJob([state.selected.id], force);
+    if (!job.selectedCount) {
+      await loadPhotoDeepAnalysis(state.selected.id);
+      return;
+    }
+    pollDeepAnalysisJob(job.id, async (next) => {
+      $("#detail-deep-analysis-result").innerHTML = "<p>" + escapeHTML(deepAnalysisJobText(next)) + "</p>";
+      if (["completed", "completed_with_errors", "failed", "cancelled"].includes(next.status)) await loadPhotoDeepAnalysis(state.selected?.id);
+    });
+  } catch (error) {
+    $("#detail-deep-analysis-result").innerHTML = "<p>" + escapeHTML(error.message || t("deepAnalysis.failed")) + "</p>";
+    button.disabled = false;
+  }
+}
+
+async function createDeepAnalysisJob(photoIds, force) {
+  const response = await fetch("/api/v1/deep-analysis-jobs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ photoIds, force }) });
+  if (!response.headers.get("content-type")?.includes("application/json")) throw new Error(t("deepAnalysis.unavailable"));
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error || t("deepAnalysis.failed"));
+  return body;
+}
+
+function pollDeepAnalysisJob(id, onUpdate) {
+  const poll = async () => {
+    try {
+      const response = await fetch("/api/v1/deep-analysis-jobs/" + encodeURIComponent(id));
+      const job = await response.json();
+      if (!response.ok) throw new Error(job.error || t("deepAnalysis.failed"));
+      onUpdate(job);
+      if (!["completed", "completed_with_errors", "failed", "cancelled"].includes(job.status)) setTimeout(poll, 1500);
+    } catch (error) {
+      onUpdate({ status: "failed", error: error.message || t("deepAnalysis.failed"), processedCount: 0, selectedCount: 0 });
+    }
+  };
+  poll();
+}
+
+function deepAnalysisJobText(job) {
+  if (job.error) return job.error;
+  if (job.status === "completed") return t("deepAnalysis.completed", { count: formatNumber(job.succeededCount) });
+  if (job.status === "completed_with_errors") return t("deepAnalysis.partial", { success: formatNumber(job.succeededCount), failed: formatNumber(job.failedCount) });
+  if (job.status === "failed") return t("deepAnalysis.failed");
+  if (job.status === "cancelled") return t("deepAnalysis.cancelled");
+  return t("deepAnalysis.progress", { processed: formatNumber(job.processedCount), total: formatNumber(job.selectedCount) });
+}
+
+async function loadPhotoDeepAnalysis(photoID) {
+  if (!photoID) return;
+  const target = $("#detail-deep-analysis-result"), button = $("#detail-deep-analysis");
+  try {
+    const response = await fetch("/api/v1/photos/" + encodeURIComponent(photoID) + "/deep-analysis");
+    if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) throw new Error(t("deepAnalysis.unavailable"));
+    const analysis = await response.json();
+    if (state.selected?.id !== photoID) return;
+    button.dataset.completed = String(analysis.status === "completed");
+    button.textContent = t(analysis.status === "completed" ? "deepAnalysis.rerun" : "deepAnalysis.action");
+    button.disabled = analysis.status === "pending" || analysis.status === "running";
+    if (analysis.status !== "completed" || !analysis.result?.caption) {
+      const statusKeys = { not_requested: "deepAnalysis.status.not_requested", pending: "deepAnalysis.status.pending", running: "deepAnalysis.status.running", completed: "deepAnalysis.status.completed", failed: "deepAnalysis.status.failed" };
+      target.innerHTML = "<p>" + escapeHTML(t(statusKeys[analysis.status] || "deepAnalysis.unavailable")) + "</p>";
+      return;
+    }
+    const result = analysis.result;
+    const tags = (result.suggestedTags || []).map((tag) => "<span># " + escapeHTML(tag) + "</span>").join("");
+    const visibleText = (result.visibleText || []).join(" · ");
+    target.innerHTML = '<p class="deep-analysis-caption">' + escapeHTML(result.caption) + "</p>" +
+      (tags ? '<div class="detail-tags">' + tags + "</div>" : "") +
+      (visibleText ? "<p><strong>" + escapeHTML(t("deepAnalysis.visibleText")) + "</strong> " + escapeHTML(visibleText) + "</p>" : "") +
+      "<small>" + escapeHTML(analysis.model || "") + "</small>";
+  } catch (error) {
+    if (state.selected?.id === photoID) {
+      button.disabled = false;
+      target.innerHTML = "<p>" + escapeHTML(t("deepAnalysis.unavailable")) + "</p>";
+    }
+  }
 }
 
 function navigateDetail(direction) {

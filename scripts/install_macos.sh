@@ -382,6 +382,9 @@ config_temporary="$CONFIG_FILE.tmp.$$"
   printf 'PHOTO_LIBRARY_ROOT=%q\n' "$LIBRARY_ROOT"
   printf 'APOFOCUS_IMPORT_ROOTS=%q\n' "$IMPORT_ROOTS"
   printf 'EMBEDDING_SERVICE_URL=%q\n' "http://127.0.0.1:8090"
+  printf 'DEEP_ANALYSIS_SERVICE_URL=%q\n' "http://127.0.0.1:8091"
+  printf 'DEEP_ANALYSIS_MODEL=%q\n' "Qwen/Qwen2-VL-7B-Instruct"
+  printf 'DEEP_ANALYSIS_PROMPT_VERSION=%q\n' "apofocus-photo-v1"
   printf 'APOFOCUS_APP_URL=%q\n' "$APP_URL"
   printf 'APOFOCUS_BACKUP_ROOT=%q\n' "$BACKUP_ROOT"
   printf 'APOFOCUS_BACKUP_STATUS=%q\n' "$BACKUP_STATUS"
@@ -475,6 +478,9 @@ if ! relation_exists init_runs; then
 fi
 if ! relation_exists stories; then
   PGPASSWORD="$DB_PASSWORD" "${PSQL[@]}" -d apofocus -f "$PROJECT_ROOT/migrations/000007_projects_stories_relations.sql"
+fi
+if ! relation_exists deep_analysis_jobs; then
+  PGPASSWORD="$DB_PASSWORD" "${PSQL[@]}" -d apofocus -f "$PROJECT_ROOT/migrations/000008_deep_analysis.sql"
 fi
 
 vector_version="$(PGPASSWORD="$DB_PASSWORD" "${PSQL[@]}" -d apofocus -Atqc "SELECT extversion FROM pg_extension WHERE extname='vector'")"

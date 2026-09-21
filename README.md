@@ -153,6 +153,24 @@ make run
 
 也可以使用既有 PostgreSQL，只要先安裝 `vector` extension，再執行 [migrations/000001_init.sql](migrations/000001_init.sql)。
 
+### 選配：大型語言深度分析
+
+照片匯入與一般自動標籤仍由 OpenCLIP 處理。需要更完整的畫面描述、物件關係與畫面文字時，可在照片頁或搜尋結果勾選照片後按「使用大型語言深度分析」。分析工作會寫入 PostgreSQL queue，結果只作為建議，不會覆蓋人工輸入的標籤或說明。
+
+Qwen2-VL 服務刻意不包含在預設安裝內。請在具備足夠記憶體或 GPU 的 server 上執行：
+
+```bash
+bash scripts/install_deep_analysis.sh --state-dir /srv/apofocus
+```
+
+若只想先安裝程式與套件、稍後再下載模型：
+
+```bash
+bash scripts/install_deep_analysis.sh --state-dir /srv/apofocus --skip-model-download
+```
+
+安裝程式最後會印出綁定 `127.0.0.1:8091` 的啟動命令。Web worker 透過 `DEEP_ANALYSIS_SERVICE_URL` 呼叫它；模型與 prompt 版本可分別用 `DEEP_ANALYSIS_MODEL`、`DEEP_ANALYSIS_PROMPT_VERSION` 設定。服務只接受 `PHOTO_ROOTS`／`THUMBNAIL_ROOTS` 內的本機檔案路徑，不應直接暴露到公開網路。
+
 資料模型的重要欄位：
 
 | 欄位 | 用途 |
