@@ -117,6 +117,15 @@ func (r *PostgresRepository) Cancel(ctx context.Context, id string) error {
 	return nil
 }
 
+func (r *PostgresRepository) RecoverStalled(ctx context.Context) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE deep_analysis_items SET status='pending',updated_at=now() WHERE status='running';
+		UPDATE photos SET deep_analysis_status='pending' WHERE deep_analysis_status='running';
+		UPDATE deep_analysis_jobs SET status='pending',heartbeat_at=now(),error='' WHERE status='running';
+	`)
+	return err
+}
+
 func (r *PostgresRepository) ClaimNext(ctx context.Context) (Job, bool, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -124,7 +133,7 @@ func (r *PostgresRepository) ClaimNext(ctx context.Context) (Job, bool, error) {
 	}
 	defer func() { _ = tx.Rollback() }()
 	var id string
-	err = tx.QueryRowContext(ctx, `SELECT id::text FROM deep_analysis_jobs WHERE status='pending' OR (status='running' AND heartbeat_at<now()-interval '20 minutes') ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1`).Scan(&id)
+	err = tx.QueryRowContext(ctx, `SELECT id::text FROM deep_analysis_jobs WHERE status='pending' OR (status='running' AND heartbeat_at<now()-interval '2 minutes') ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1`).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Job{}, false, nil
 	}
@@ -132,6 +141,9 @@ func (r *PostgresRepository) ClaimNext(ctx context.Context) (Job, bool, error) {
 		return Job{}, false, err
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE deep_analysis_items SET status='pending',updated_at=now() WHERE job_id=$1 AND status='running'`, id); err != nil {
+		return Job{}, false, err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE photos SET deep_analysis_status='pending' WHERE id IN (SELECT photo_id FROM deep_analysis_items WHERE job_id=$1)`, id); err != nil {
 		return Job{}, false, err
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE deep_analysis_jobs SET status='running',started_at=COALESCE(started_at,now()),heartbeat_at=now(),error='' WHERE id=$1`, id); err != nil {

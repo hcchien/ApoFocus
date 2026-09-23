@@ -51,6 +51,7 @@ func (r *fakeRepository) CompleteItem(_ context.Context, _ Job, _ Item, result j
 }
 func (r *fakeRepository) Heartbeat(context.Context, string) (bool, error) { return false, nil }
 func (r *fakeRepository) Finish(context.Context, string, error) error     { return nil }
+func (r *fakeRepository) RecoverStalled(context.Context) error            { return nil }
 
 func TestServiceCreateCleansDuplicateIDsAndUsesDefaults(t *testing.T) {
 	repository := &fakeRepository{}

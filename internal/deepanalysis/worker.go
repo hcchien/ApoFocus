@@ -17,6 +17,7 @@ func NewWorker(repository Repository, analyzer Analyzer) *Worker {
 }
 
 func (w *Worker) Run(ctx context.Context) error {
+	_ = w.repository.RecoverStalled(ctx)
 	ticker := time.NewTicker(w.pollInterval)
 	defer ticker.Stop()
 	for {

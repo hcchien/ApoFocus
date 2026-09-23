@@ -771,6 +771,13 @@ async function loadPhotoDeepAnalysis(photoID) {
     if (analysis.status !== "completed" || !analysis.result?.caption) {
       const statusKeys = { not_requested: "deepAnalysis.status.not_requested", pending: "deepAnalysis.status.pending", running: "deepAnalysis.status.running", completed: "deepAnalysis.status.completed", failed: "deepAnalysis.status.failed" };
       target.innerHTML = "<p>" + escapeHTML(t(statusKeys[analysis.status] || "deepAnalysis.unavailable")) + "</p>";
+      if (analysis.status === "pending" || analysis.status === "running") {
+        setTimeout(() => {
+          if (state.selected?.id === photoID && dialog?.open) {
+            loadPhotoDeepAnalysis(photoID);
+          }
+        }, 2000);
+      }
       return;
     }
     const result = analysis.result;

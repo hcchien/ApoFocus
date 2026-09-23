@@ -81,11 +81,21 @@ def load_pipeline():
         min_pixels=MIN_PIXELS,
         max_pixels=MAX_PIXELS,
     )
+    max_memory = None
+    dtype = "auto"
+    if torch.backends.mps.is_available():
+        dtype = torch.bfloat16
+        max_mem_bytes = getattr(torch.mps, "recommended_max_memory", lambda: 20 * 1024**3)()
+        max_memory = {"mps": max_mem_bytes}
+    elif torch.cuda.is_available():
+        dtype = "auto"
+
     model = AutoModelForMultimodalLM.from_pretrained(
         MODEL_ID,
         revision=MODEL_REVISION,
-        torch_dtype="auto",
+        torch_dtype=dtype,
         device_map="auto",
+        max_memory=max_memory,
     )
     model.eval()
     return model, processor

@@ -81,4 +81,5 @@ type Repository interface {
 	CompleteItem(context.Context, Job, Item, json.RawMessage, error) error
 	Heartbeat(context.Context, string) (bool, error)
 	Finish(context.Context, string, error) error
+	RecoverStalled(context.Context) error
 }

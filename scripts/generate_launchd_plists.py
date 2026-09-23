@@ -22,6 +22,7 @@ def write_agent(
     run_at_load: bool = True,
     keep_alive: bool = True,
     start_calendar_interval: dict[str, int] | None = None,
+    process_type: str = "Background",
 ) -> None:
     payload = {
         "Label": label,
@@ -30,7 +31,7 @@ def write_agent(
         "WorkingDirectory": str(working_directory),
         "RunAtLoad": run_at_load,
         "KeepAlive": keep_alive,
-        "ProcessType": "Background",
+        "ProcessType": process_type,
         "ThrottleInterval": 5,
         "StandardOutPath": str(stdout_path),
         "StandardErrorPath": str(stderr_path),
@@ -203,6 +204,7 @@ def main() -> None:
             deep_analysis_dir,
             args.logs_dir / "deep-analysis.log",
             args.logs_dir / "deep-analysis.error.log",
+            process_type="Interactive",
         )
 
     web_environment = {
