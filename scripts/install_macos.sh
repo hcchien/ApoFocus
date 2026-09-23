@@ -420,6 +420,9 @@ chmod 600 "$CONFIG_FILE"
 for label in com.apofocus.postgres com.apofocus.embedding com.apofocus.worker com.apofocus.web; do
   plutil -lint "$LAUNCH_AGENT_DIR/$label.plist" >/dev/null
 done
+if [[ -f "$LAUNCH_AGENT_DIR/com.apofocus.deep-analysis.plist" ]]; then
+  plutil -lint "$LAUNCH_AGENT_DIR/com.apofocus.deep-analysis.plist" >/dev/null
+fi
 if [[ -n "$BACKUP_ROOT" ]]; then
   for label in com.apofocus.backup com.apofocus.backup-verify; do
     plutil -lint "$LAUNCH_AGENT_DIR/$label.plist" >/dev/null
@@ -431,7 +434,7 @@ launchctl print "$DOMAIN" >/dev/null 2>&1 || fail "no macOS GUI login session is
 for label in com.apofocus.backup-verify com.apofocus.backup; do
   launchctl bootout "$DOMAIN/$label" >/dev/null 2>&1 || true
 done
-for label in com.apofocus.web com.apofocus.worker com.apofocus.embedding com.apofocus.postgres; do
+for label in com.apofocus.deep-analysis com.apofocus.web com.apofocus.worker com.apofocus.embedding com.apofocus.postgres; do
   launchctl bootout "$DOMAIN/$label" >/dev/null 2>&1 || true
 done
 wait_for_port_release "$POSTGRES_PORT" || fail "PostgreSQL port $POSTGRES_PORT is already in use; choose another --postgres-port"
@@ -489,6 +492,9 @@ vector_version="$(PGPASSWORD="$DB_PASSWORD" "${PSQL[@]}" -d apofocus -Atqc "SELE
 CURRENT_STEP="ApoFocus services"
 if (( NO_START == 0 )); then
   launchctl bootstrap "$DOMAIN" "$LAUNCH_AGENT_DIR/com.apofocus.embedding.plist"
+  if [[ -f "$LAUNCH_AGENT_DIR/com.apofocus.deep-analysis.plist" ]]; then
+    launchctl bootstrap "$DOMAIN" "$LAUNCH_AGENT_DIR/com.apofocus.deep-analysis.plist"
+  fi
   if [[ -n "$BACKUP_ROOT" ]]; then
     launchctl bootstrap "$DOMAIN" "$LAUNCH_AGENT_DIR/com.apofocus.backup.plist"
     launchctl bootstrap "$DOMAIN" "$LAUNCH_AGENT_DIR/com.apofocus.backup-verify.plist"

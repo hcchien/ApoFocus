@@ -166,6 +166,45 @@ def main() -> None:
         args.logs_dir / "embedding.error.log",
     )
 
+    deep_analysis_dir = args.state_dir / "services" / "deep-analysis"
+    deep_analysis_python = (
+        args.state_dir / "deep-analysis-venv" / "bin" / "python"
+        if (args.state_dir / "deep-analysis-venv" / "bin" / "python").exists()
+        else args.python_bin
+    )
+    if (deep_analysis_dir / "app.py").exists():
+        deep_environment = {
+            **common_environment,
+            "PHOTO_ROOTS": os.pathsep.join(photo_roots),
+            "THUMBNAIL_ROOTS": str(args.library_root),
+            "PHOTO_LIBRARY_ROOT": str(args.library_root),
+            "HF_HOME": str(model_cache / "huggingface"),
+            "TORCH_HOME": str(model_cache / "torch"),
+            "XDG_CACHE_HOME": str(model_cache / "xdg"),
+            "DEEP_ANALYSIS_MODEL": "Qwen/Qwen2-VL-7B-Instruct",
+            "DEEP_ANALYSIS_PROMPT_VERSION": "apofocus-photo-v1",
+        }
+        write_agent(
+            args.output_dir / "com.apofocus.deep-analysis.plist",
+            "com.apofocus.deep-analysis",
+            [
+                str(deep_analysis_python),
+                "-m",
+                "uvicorn",
+                "app:app",
+                "--app-dir",
+                str(deep_analysis_dir),
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "8091",
+            ],
+            deep_environment,
+            deep_analysis_dir,
+            args.logs_dir / "deep-analysis.log",
+            args.logs_dir / "deep-analysis.error.log",
+        )
+
     web_environment = {
         **common_environment,
         "ADDR": args.addr,

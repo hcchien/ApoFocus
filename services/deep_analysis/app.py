@@ -15,6 +15,7 @@ from pathlib import Path
 
 import torch
 import pillow_avif  # noqa: F401 - registers AVIF support with Pillow
+from PIL import Image
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from transformers import AutoModelForMultimodalLM, AutoProcessor
@@ -119,12 +120,14 @@ def parse_json_response(value: str) -> dict:
 
 def analyze(path: Path) -> dict:
     model, processor = load_pipeline()
+    with Image.open(path) as image:
+        rgb_image = image.convert("RGB")
     messages = [
         {"role": "system", "content": [{"type": "text", "text": SYSTEM_PROMPT}]},
         {
             "role": "user",
             "content": [
-                {"type": "image", "url": path.as_uri()},
+                {"type": "image", "image": rgb_image},
                 {"type": "text", "text": "請分析這張照片並依指定格式輸出。"},
             ],
         },

@@ -5,7 +5,12 @@ IFS=$'\n\t'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-STATE_DIR="${APOFOCUS_STATE_DIR:-$HOME/.local/share/apofocus}"
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  DEFAULT_STATE_DIR="$HOME/Library/Application Support/ApoFocus"
+else
+  DEFAULT_STATE_DIR="$HOME/.local/share/apofocus"
+fi
+STATE_DIR="${APOFOCUS_STATE_DIR:-$DEFAULT_STATE_DIR}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 SKIP_MODEL_DOWNLOAD=0
 
