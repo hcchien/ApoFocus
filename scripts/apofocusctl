@@ -46,6 +46,14 @@ stop_services() {
     label="${LABELS[$index]}"
     launchctl bootout "$DOMAIN/$label" >/dev/null 2>&1 || true
   done
+  for label in "${SERVICE_LABELS[@]}"; do
+    for _ in $(seq 1 40); do
+      if ! launchctl print "$DOMAIN/$label" >/dev/null 2>&1; then
+        break
+      fi
+      sleep 0.1
+    done
+  done
   if [[ -n "${POSTGRES_PORT:-}" ]]; then
     for _ in $(seq 1 40); do
       if ! lsof -nP -iTCP:"$POSTGRES_PORT" -sTCP:LISTEN >/dev/null 2>&1; then

@@ -8,5 +8,7 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
 fi
 # The installer owns this file and writes shell-escaped values with mode 600.
 # shellcheck disable=SC1090
+set -a
 source "$CONFIG_FILE"
+set +a
 exec "$STATE_DIR/bin/apofocus-init-bin" "$@"

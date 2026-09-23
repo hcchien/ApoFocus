@@ -196,21 +196,40 @@ func (r *PostgresRepository) observePath(ctx context.Context, root Root, previou
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	queries := []string{
-		`UPDATE photos SET path=$3,relative_path=$4,image_url='/api/v1/photos/'||id::text||'/file',file_id=NULLIF($6,''),availability_status='available',last_verified_at=now(),updated_at=now()
-		 WHERE storage_root_id=$1 AND ((file_id IS NOT NULL AND file_id=$6) OR path=$2)`,
-		`UPDATE photos SET thumbnail_path=$3,thumbnail_relative_path=$4,thumbnail_url=$5,thumbnail_file_id=NULLIF($6,''),thumbnail_status='available',last_verified_at=now(),updated_at=now()
-		 WHERE COALESCE(thumbnail_storage_root_id,storage_root_id)=$1 AND ((thumbnail_file_id IS NOT NULL AND thumbnail_file_id=$6) OR thumbnail_path=$2)`,
-		`UPDATE media_assets SET path=$3,relative_path=$4,media_url='/api/v1/'||CASE WHEN media_type='video' THEN 'videos' ELSE 'audios' END||'/'||id::text||'/file',file_id=NULLIF($6,''),availability_status='available',last_verified_at=now(),updated_at=now()
-		 WHERE storage_root_id=$1 AND ((file_id IS NOT NULL AND file_id=$6) OR path=$2)`,
-		`UPDATE media_assets SET thumbnail_path=$3,thumbnail_relative_path=$4,thumbnail_url=$5,thumbnail_file_id=NULLIF($6,''),thumbnail_status='available',last_verified_at=now(),updated_at=now()
-		 WHERE COALESCE(thumbnail_storage_root_id,storage_root_id)=$1 AND ((thumbnail_file_id IS NOT NULL AND thumbnail_file_id=$6) OR thumbnail_path=$2)`,
-		`UPDATE media_segments ms SET keyframe_path=$3,keyframe_relative_path=$4,keyframe_url=$5,keyframe_file_id=NULLIF($6,''),keyframe_status='available',last_verified_at=now()
-		 FROM media_assets ma WHERE ma.id=ms.media_asset_id AND ma.storage_root_id=$1
-		 AND ((ms.keyframe_file_id IS NOT NULL AND ms.keyframe_file_id=$6) OR ms.keyframe_path=$2)`,
+	type querySpec struct {
+		sql  string
+		args []any
 	}
-	for _, query := range queries {
-		if _, err := tx.ExecContext(ctx, query, root.ID, previousPath, path, relative, publicURL, identity.FileID); err != nil {
+	queries := []querySpec{
+		{
+			sql: `UPDATE photos SET path=$3,relative_path=$4,image_url='/api/v1/photos/'||id::text||'/file',file_id=NULLIF($5,''),availability_status='available',last_verified_at=now(),updated_at=now()
+			      WHERE storage_root_id=$1 AND ((file_id IS NOT NULL AND file_id=$5) OR path=$2)`,
+			args: []any{root.ID, previousPath, path, relative, identity.FileID},
+		},
+		{
+			sql: `UPDATE photos SET thumbnail_path=$3,thumbnail_relative_path=$4,thumbnail_url=$5,thumbnail_file_id=NULLIF($6,''),thumbnail_status='available',last_verified_at=now(),updated_at=now()
+			      WHERE COALESCE(thumbnail_storage_root_id,storage_root_id)=$1 AND ((thumbnail_file_id IS NOT NULL AND thumbnail_file_id=$6) OR thumbnail_path=$2)`,
+			args: []any{root.ID, previousPath, path, relative, publicURL, identity.FileID},
+		},
+		{
+			sql: `UPDATE media_assets SET path=$3,relative_path=$4,media_url='/api/v1/'||CASE WHEN media_type='video' THEN 'videos' ELSE 'audios' END||'/'||id::text||'/file',file_id=NULLIF($5,''),availability_status='available',last_verified_at=now(),updated_at=now()
+			      WHERE storage_root_id=$1 AND ((file_id IS NOT NULL AND file_id=$5) OR path=$2)`,
+			args: []any{root.ID, previousPath, path, relative, identity.FileID},
+		},
+		{
+			sql: `UPDATE media_assets SET thumbnail_path=$3,thumbnail_relative_path=$4,thumbnail_url=$5,thumbnail_file_id=NULLIF($6,''),thumbnail_status='available',last_verified_at=now(),updated_at=now()
+			      WHERE COALESCE(thumbnail_storage_root_id,storage_root_id)=$1 AND ((thumbnail_file_id IS NOT NULL AND thumbnail_file_id=$6) OR thumbnail_path=$2)`,
+			args: []any{root.ID, previousPath, path, relative, publicURL, identity.FileID},
+		},
+		{
+			sql: `UPDATE media_segments ms SET keyframe_path=$3,keyframe_relative_path=$4,keyframe_url=$5,keyframe_file_id=NULLIF($6,''),keyframe_status='available',last_verified_at=now()
+			      FROM media_assets ma WHERE ma.id=ms.media_asset_id AND ma.storage_root_id=$1
+			      AND ((ms.keyframe_file_id IS NOT NULL AND ms.keyframe_file_id=$6) OR ms.keyframe_path=$2)`,
+			args: []any{root.ID, previousPath, path, relative, publicURL, identity.FileID},
+		},
+	}
+	for _, q := range queries {
+		if _, err := tx.ExecContext(ctx, q.sql, q.args...); err != nil {
 			return fmt.Errorf("observe storage path: %w", err)
 		}
 	}

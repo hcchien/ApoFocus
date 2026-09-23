@@ -53,7 +53,8 @@ func TestPostgresRepositoryTracksMovedPhoto(t *testing.T) {
 	}
 	rootID = root.ID
 	canonicalOriginalPath := filepath.Join(root.BasePath, "original.jpg")
-	assertPhotoTracking(t, db, photoID, canonicalOriginalPath, "original.jpg", "/media/original.jpg", "available")
+	expectedURL := "/api/v1/photos/" + photoID + "/file"
+	assertPhotoTracking(t, db, photoID, canonicalOriginalPath, "original.jpg", expectedURL, "available")
 	assertCatalogAvailability(t, db, photoID, "available")
 
 	movedPath := filepath.Join(root.BasePath, "selected", "moved.jpg")
@@ -70,13 +71,13 @@ func TestPostgresRepositoryTracksMovedPhoto(t *testing.T) {
 	if err := repository.ObservePath(ctx, root, movedPath, identity); err != nil {
 		t.Fatal(err)
 	}
-	assertPhotoTracking(t, db, photoID, movedPath, "selected/moved.jpg", "/media/selected/moved.jpg", "available")
+	assertPhotoTracking(t, db, photoID, movedPath, "selected/moved.jpg", expectedURL, "available")
 	assertCatalogAvailability(t, db, photoID, "available")
 
 	if err := repository.MarkMissing(ctx, root, movedPath); err != nil {
 		t.Fatal(err)
 	}
-	assertPhotoTracking(t, db, photoID, movedPath, "selected/moved.jpg", "/media/selected/moved.jpg", "missing")
+	assertPhotoTracking(t, db, photoID, movedPath, "selected/moved.jpg", expectedURL, "missing")
 	assertCatalogAvailability(t, db, photoID, "missing")
 
 	if err := repository.MarkRootOffline(ctx, root); err != nil {
