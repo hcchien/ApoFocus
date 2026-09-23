@@ -45,7 +45,8 @@ func main() {
 		options.Relations = store.(catalog.RelationStore)
 		options.Folders = folders.NewPostgresRepository(db)
 		deepRepository := deepanalysis.NewPostgresRepository(db)
-		options.DeepAnalysis = deepanalysis.NewService(deepRepository, envOr("DEEP_ANALYSIS_MODEL", deepanalysis.DefaultModel), envOr("DEEP_ANALYSIS_PROMPT_VERSION", deepanalysis.DefaultPromptVersion))
+		deepAnalyzer := deepanalysis.NewHTTPAnalyzer(envOr("DEEP_ANALYSIS_SERVICE_URL", "http://127.0.0.1:8091"))
+		options.DeepAnalysis = deepanalysis.NewServiceWithAnalyzer(deepRepository, envOr("DEEP_ANALYSIS_MODEL", deepanalysis.DefaultModel), envOr("DEEP_ANALYSIS_PROMPT_VERSION", deepanalysis.DefaultPromptVersion), deepAnalyzer)
 		storageRootID := ""
 		libraryOnline := false
 		if mediaRoot != "" {
@@ -93,7 +94,7 @@ func main() {
 				}
 			}()
 			logger.Info("local sequential batch worker enabled")
-			deepWorker := deepanalysis.NewWorker(deepRepository, deepanalysis.NewHTTPAnalyzer(envOr("DEEP_ANALYSIS_SERVICE_URL", "http://127.0.0.1:8091")))
+			deepWorker := deepanalysis.NewWorker(deepRepository, deepAnalyzer)
 			go func() {
 				if workerErr := deepWorker.Run(ctx); workerErr != nil && !errors.Is(workerErr, context.Canceled) {
 					logger.Error("deep analysis worker stopped", "error", workerErr)

@@ -80,3 +80,42 @@ func (s *Server) cancelDeepAnalysisJob(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+func (s *Server) getDeepAnalysisStatus(w http.ResponseWriter, r *http.Request) {
+	if s.deepAnalysis == nil {
+		writeJSON(w, http.StatusOK, deepanalysis.ServiceStatus{Available: false, Active: false})
+		return
+	}
+	status, err := s.deepAnalysis.Status(r.Context())
+	if err != nil {
+		s.internalError(w, "get deep analysis status", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+
+func (s *Server) activateDeepAnalysis(w http.ResponseWriter, r *http.Request) {
+	if s.deepAnalysis == nil {
+		writeError(w, http.StatusServiceUnavailable, "deep analysis service is not configured")
+		return
+	}
+	status, err := s.deepAnalysis.Activate(r.Context())
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+
+func (s *Server) deactivateDeepAnalysis(w http.ResponseWriter, r *http.Request) {
+	if s.deepAnalysis == nil {
+		writeError(w, http.StatusServiceUnavailable, "deep analysis service is not configured")
+		return
+	}
+	status, err := s.deepAnalysis.Deactivate(r.Context())
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
+}

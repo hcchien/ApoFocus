@@ -7,6 +7,7 @@ first analysis request. Do not expose this service to the public internet.
 
 from __future__ import annotations
 
+import gc
 import json
 import os
 import re
@@ -146,18 +147,54 @@ def analyze(path: Path) -> dict:
     return parse_json_response(response)
 
 
+ACTIVE = True
+
+
 @app.get("/healthz")
 def health() -> dict:
     return {
         "status": "ok",
+        "active": ACTIVE,
         "model": MODEL_ID,
         "promptVersion": PROMPT_VERSION,
         "modelLoaded": load_pipeline.cache_info().currsize > 0,
     }
 
 
+@app.post("/v1/deactivate")
+def deactivate() -> dict:
+    global ACTIVE
+    ACTIVE = False
+    load_pipeline.cache_clear()
+    gc.collect()
+    if torch.backends.mps.is_available():
+        torch.mps.empty_cache()
+    elif torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    return {
+        "status": "ok",
+        "active": False,
+        "model": MODEL_ID,
+        "modelLoaded": False,
+    }
+
+
+@app.post("/v1/activate")
+def activate() -> dict:
+    global ACTIVE
+    ACTIVE = True
+    return {
+        "status": "ok",
+        "active": True,
+        "model": MODEL_ID,
+        "modelLoaded": load_pipeline.cache_info().currsize > 0,
+    }
+
+
 @app.post("/v1/analyze-photo", response_model=AnalyzePhotoResponse)
 def analyze_photo(request: AnalyzePhotoRequest) -> AnalyzePhotoResponse:
+    if not ACTIVE:
+        raise HTTPException(status_code=409, detail="deep analysis service is deactivated")
     payload = analyze(safe_path(request.path))
     return AnalyzePhotoResponse(
         model=MODEL_ID,

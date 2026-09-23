@@ -29,6 +29,7 @@ const state = {
   relationCatalog: null,
   bulkSelections: { photos: new Set(), videos: new Set(), audios: new Set() },
   filters: { q: "", year: "", project: "", tags: [], camera: "", lens: "", minISO: "", maxISO: "", location: false, codec: "", duration: "", transcript: false },
+  llm: { available: true, active: true, modelLoaded: false, model: "Qwen/Qwen2-VL-7B-Instruct", loading: false },
 };
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -44,7 +45,7 @@ document.addEventListener("DOMContentLoaded", init);
 async function init() {
   bindEvents();
   applyMediaUI({ syncURL: false });
-  await Promise.all([loadFacets(), loadPhotos()]);
+  await Promise.all([loadFacets(), loadPhotos(), loadLLMStatus()]);
 }
 
 function bindEvents() {
@@ -116,6 +117,7 @@ function bindEvents() {
   $("#bulk-relations-form").addEventListener("submit", applyBulkRelations);
   $("#bulk-relations-form").elements.operation.addEventListener("change", syncBulkRelationForm);
   $("#detail-deep-analysis").addEventListener("click", startDetailDeepAnalysis);
+  $("#llm-toggle-btn")?.addEventListener("click", toggleLLMState);
   bulkRelationsDialog.addEventListener("click", (event) => { if (event.target === bulkRelationsDialog) bulkRelationsDialog.close(); });
   window.addEventListener("apofocus:localechange", refreshLocalizedUI);
 }
@@ -124,6 +126,7 @@ function refreshLocalizedUI() {
   applyTranslations();
   applyMediaUI({ syncURL: false });
   renderActiveFilters();
+  renderLLMControl();
   if (state.mediaType === "photos") renderPhotos();
   else renderMediaAssets();
   if (state.selected && dialog.open) openDetail(state.selected.id);
@@ -609,10 +612,73 @@ async function openDetail(id) {
   if (!dialog.open) dialog.showModal();
 }
 
+async function loadLLMStatus() {
+  try {
+    const response = await fetch("/api/v1/deep-analysis/status");
+    if (!response.ok) return;
+    const data = await response.json();
+    state.llm.available = data.available;
+    state.llm.active = data.active;
+    state.llm.modelLoaded = data.modelLoaded;
+    if (data.model) state.llm.model = data.model;
+    renderLLMControl();
+  } catch (err) {
+    console.warn("loadLLMStatus error", err);
+  }
+}
+
+function renderLLMControl() {
+  const btn = $("#llm-toggle-btn");
+  const text = $("#llm-status-text");
+  if (!btn || !text) return;
+  btn.classList.toggle("active", Boolean(state.llm.active));
+  btn.classList.toggle("loading", Boolean(state.llm.loading));
+  btn.setAttribute("aria-pressed", String(Boolean(state.llm.active)));
+  if (state.llm.loading) {
+    text.textContent = t("llm.switching");
+  } else if (state.llm.active) {
+    text.textContent = t("llm.active");
+  } else {
+    text.textContent = t("llm.deactive");
+  }
+}
+
+async function toggleLLMState() {
+  if (state.llm.loading) return;
+  state.llm.loading = true;
+  renderLLMControl();
+  const nextActive = !state.llm.active;
+  const endpoint = nextActive ? "/api/v1/deep-analysis/activate" : "/api/v1/deep-analysis/deactivate";
+  try {
+    const response = await fetch(endpoint, { method: "POST" });
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(errData.error || ("Request failed (" + response.status + ")"));
+    }
+    const data = await response.json();
+    state.llm.active = data.active;
+    state.llm.modelLoaded = data.modelLoaded;
+  } catch (err) {
+    alert(err.message || "Failed to toggle LLM state");
+    await loadLLMStatus();
+  } finally {
+    state.llm.loading = false;
+    renderLLMControl();
+  }
+}
+
 async function startBulkDeepAnalysis() {
   if (state.mediaType !== "photos") return;
   const ids = [...state.bulkSelections.photos];
   if (!ids.length) return;
+  if (!state.llm.active) {
+    if (confirm(t("llm.deactivatedNote") + "\n\n" + (document.documentElement.lang === "zh-Hant" ? "是否立即啟用大型語言模型並開始分析？" : "Activate LLM now?"))) {
+      await toggleLLMState();
+      if (!state.llm.active) return;
+    } else {
+      return;
+    }
+  }
   const button = $("#start-deep-analysis");
   button.disabled = true;
   $("#bulk-selection-message").textContent = t("deepAnalysis.queueing");
@@ -631,6 +697,14 @@ async function startBulkDeepAnalysis() {
 
 async function startDetailDeepAnalysis() {
   if (!state.selected) return;
+  if (!state.llm.active) {
+    if (confirm(t("llm.deactivatedNote") + "\n\n" + (document.documentElement.lang === "zh-Hant" ? "是否立即啟用大型語言模型並開始分析？" : "Activate LLM now?"))) {
+      await toggleLLMState();
+      if (!state.llm.active) return;
+    } else {
+      return;
+    }
+  }
   const button = $("#detail-deep-analysis");
   const force = button.dataset.completed === "true";
   button.disabled = true;

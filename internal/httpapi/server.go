@@ -75,6 +75,9 @@ func (s *Server) routes() {
 		s.router.HandleFunc("GET /api/v1/deep-analysis-jobs/{id}", s.getDeepAnalysisJob)
 		s.router.HandleFunc("GET /api/v1/deep-analysis-jobs/{id}/items", s.getDeepAnalysisItems)
 		s.router.HandleFunc("POST /api/v1/deep-analysis-jobs/{id}/cancel", s.cancelDeepAnalysisJob)
+		s.router.HandleFunc("GET /api/v1/deep-analysis/status", s.getDeepAnalysisStatus)
+		s.router.HandleFunc("POST /api/v1/deep-analysis/activate", s.activateDeepAnalysis)
+		s.router.HandleFunc("POST /api/v1/deep-analysis/deactivate", s.deactivateDeepAnalysis)
 	}
 	s.router.HandleFunc("GET /api/v1/facets", s.getFacets)
 	if s.relations != nil {

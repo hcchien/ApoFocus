@@ -82,7 +82,16 @@
         <div class="topbar-actions">
           <label class="locale-control"><span class="visually-hidden" data-i18n="language.label">語言</span><select id="locale-select" aria-label="語言" data-i18n-aria-label="language.label"><option value="zh-TW">繁體中文</option><option value="en">English</option><option value="de">Deutsch</option></select></label>
           <button class="icon-button" title="通知" aria-label="通知" data-i18n-title="topbar.notifications" data-i18n-aria-label="topbar.notifications"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg><i class="status-dot"></i></button>
-          <button class="profile-button"><span class="avatar">HC</span><span class="profile-copy"><strong>H.C. Chien</strong><small data-i18n="topbar.profile">攝影資料庫</small></span><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
+          <div class="llm-control" id="llm-control">
+            <button class="llm-toggle-btn active" id="llm-toggle-btn" type="button" aria-pressed="true" title="切換大型語言模型狀態（停用可釋放記憶體）" data-i18n-title="llm.tooltip">
+              <span class="llm-status-dot"></span>
+              <span class="llm-label-wrap">
+                <span class="llm-label" data-i18n="llm.title">大型語言模型</span>
+                <span class="llm-status-text" id="llm-status-text" data-i18n="llm.active">已啟用 (Qwen2-VL)</span>
+              </span>
+              <span class="llm-switch" aria-hidden="true"><span class="llm-switch-knob"></span></span>
+            </button>
+          </div>
         </div>
       </header>
 

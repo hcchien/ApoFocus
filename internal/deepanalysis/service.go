@@ -10,16 +10,42 @@ type Service struct {
 	repository    Repository
 	model         string
 	promptVersion string
+	analyzer      *HTTPAnalyzer
 }
 
 func NewService(repository Repository, model, promptVersion string) *Service {
+	return NewServiceWithAnalyzer(repository, model, promptVersion, nil)
+}
+
+func NewServiceWithAnalyzer(repository Repository, model, promptVersion string, analyzer *HTTPAnalyzer) *Service {
 	if strings.TrimSpace(model) == "" {
 		model = DefaultModel
 	}
 	if strings.TrimSpace(promptVersion) == "" {
 		promptVersion = DefaultPromptVersion
 	}
-	return &Service{repository: repository, model: model, promptVersion: promptVersion}
+	return &Service{repository: repository, model: model, promptVersion: promptVersion, analyzer: analyzer}
+}
+
+func (s *Service) Status(ctx context.Context) (ServiceStatus, error) {
+	if s.analyzer == nil {
+		return ServiceStatus{Available: false, Active: false}, nil
+	}
+	return s.analyzer.Status(ctx)
+}
+
+func (s *Service) Activate(ctx context.Context) (ServiceStatus, error) {
+	if s.analyzer == nil {
+		return ServiceStatus{Available: false, Active: false}, errors.New("deep analysis analyzer is not configured")
+	}
+	return s.analyzer.Activate(ctx)
+}
+
+func (s *Service) Deactivate(ctx context.Context) (ServiceStatus, error) {
+	if s.analyzer == nil {
+		return ServiceStatus{Available: false, Active: false}, errors.New("deep analysis analyzer is not configured")
+	}
+	return s.analyzer.Deactivate(ctx)
 }
 
 func (s *Service) Create(ctx context.Context, input CreateInput) (Job, error) {
