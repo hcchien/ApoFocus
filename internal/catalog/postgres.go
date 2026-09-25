@@ -78,11 +78,11 @@ func (s *PostgresStore) Facets(ctx context.Context) (Facets, error) {
 		query  string
 		target *[]FacetCount
 	}{
-		{`SELECT capture_year::text, count(*) FROM photos GROUP BY capture_year ORDER BY capture_year DESC`, &facets.Years},
-		{`SELECT COALESCE(NULLIF(pr.description,''),pr.name,''),count(*) FROM project_photos pp JOIN projects pr ON pr.id=pp.project_id GROUP BY pr.id,pr.description,pr.name ORDER BY count(*) DESC,COALESCE(NULLIF(pr.description,''),pr.name,'')`, &facets.Projects},
-		{`SELECT t.name, count(*) FROM photo_tags pt JOIN tags t ON t.id=pt.tag_id GROUP BY t.name ORDER BY count(*) DESC, t.name`, &facets.Tags},
-		{`SELECT camera, count(*) FROM photos WHERE camera IS NOT NULL GROUP BY camera ORDER BY count(*) DESC, camera`, &facets.Cameras},
-		{`SELECT lens, count(*) FROM photos WHERE lens IS NOT NULL GROUP BY lens ORDER BY count(*) DESC, lens`, &facets.Lenses},
+		{`SELECT capture_year::text, count(*) FROM photos WHERE duplicate_of IS NULL GROUP BY capture_year ORDER BY capture_year DESC`, &facets.Years},
+		{`SELECT COALESCE(NULLIF(pr.description,''),pr.name,''),count(*) FROM project_photos pp JOIN projects pr ON pr.id=pp.project_id JOIN photos p ON p.id=pp.photo_id WHERE p.duplicate_of IS NULL GROUP BY pr.id,pr.description,pr.name ORDER BY count(*) DESC,COALESCE(NULLIF(pr.description,''),pr.name,'')`, &facets.Projects},
+		{`SELECT t.name, count(*) FROM photo_tags pt JOIN tags t ON t.id=pt.tag_id JOIN photos p ON p.id=pt.photo_id WHERE p.duplicate_of IS NULL GROUP BY t.name ORDER BY count(*) DESC, t.name`, &facets.Tags},
+		{`SELECT camera, count(*) FROM photos WHERE duplicate_of IS NULL AND camera IS NOT NULL GROUP BY camera ORDER BY count(*) DESC, camera`, &facets.Cameras},
+		{`SELECT lens, count(*) FROM photos WHERE duplicate_of IS NULL AND lens IS NOT NULL GROUP BY lens ORDER BY count(*) DESC, lens`, &facets.Lenses},
 	}
 	for _, item := range queries {
 		rows, err := s.db.QueryContext(ctx, item.query)
@@ -108,7 +108,7 @@ func (s *PostgresStore) Similar(ctx context.Context, id string, limit int) ([]Si
 	query := `WITH anchor AS (SELECT embedding FROM photos WHERE id=$1 AND embedding IS NOT NULL)
 ` + strings.Replace(photoSelect, "SELECT ", "SELECT 1 - (p.embedding <=> anchor.embedding) AS similarity, ", 1) + `
 CROSS JOIN anchor
-WHERE p.id <> $1 AND p.embedding IS NOT NULL
+WHERE p.id <> $1 AND p.duplicate_of IS NULL AND p.embedding IS NOT NULL
 ORDER BY p.embedding <=> anchor.embedding
 LIMIT $2`
 	rows, err := s.db.QueryContext(ctx, query, id, limit)
@@ -135,7 +135,7 @@ LIMIT $2`
 }
 
 func buildWhere(filter Filter) (string, []any) {
-	clauses := []string{"TRUE"}
+	clauses := []string{"p.duplicate_of IS NULL"}
 	args := make([]any, 0, 8)
 	add := func(format string, value any) {
 		args = append(args, value)

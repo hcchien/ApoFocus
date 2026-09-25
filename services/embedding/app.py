@@ -10,6 +10,7 @@ import os
 import json
 import importlib.util
 import io
+import math
 import mimetypes
 import shutil
 import subprocess
@@ -128,6 +129,7 @@ class AnalyzeResponse(BaseModel):
     vector: list[float]
     tags: list[str]
     dominant_color: str = Field(alias="dominantColor")
+    phash: int | None = None
     timings_ms: dict[str, float] = Field(default_factory=dict, alias="timingsMs")
 
 class AnalyzeBatchRequest(BaseModel):
@@ -267,6 +269,33 @@ def save_derivative(image: Image.Image, destination: Path, quality: int | None =
 def dominant_color(image: Image.Image) -> str:
     red, green, blue = image.resize((1, 1), Image.Resampling.BOX).getpixel((0, 0))
     return f"#{red:02x}{green:02x}{blue:02x}"
+
+
+DCT_COS = [[math.cos(math.pi * (2 * n + 1) * k / 64.0) for n in range(32)] for k in range(8)]
+
+
+def compute_phash(image: Image.Image) -> int | None:
+    gray = image.convert("L").resize((32, 32), Image.Resampling.LANCZOS)
+    pixels = list(gray.getdata())
+    row_dct = [
+        [sum(pixels[y * 32 + x] * DCT_COS[u][x] for x in range(32)) for u in range(8)]
+        for y in range(32)
+    ]
+    coeffs = [
+        sum(row_dct[y][u] * DCT_COS[v][y] for y in range(32))
+        for v in range(8)
+        for u in range(8)
+    ]
+    sorted_ac = sorted(coeffs[1:])
+    if sorted_ac[62] - sorted_ac[0] < 1.0:
+        return None
+    median = sorted_ac[31]
+    value = 0
+    for c in coeffs:
+        value = (value << 1) | (1 if c > median else 0)
+    if value >= (1 << 63):
+        value -= 1 << 64
+    return value
 
 
 def make_video_thumbnail(images: list[Image.Image]) -> Image.Image:
@@ -721,6 +750,7 @@ def analyze_photo(request: AnalyzeRequest) -> AnalyzeResponse:
 
     stage_started = time.perf_counter()
     color = dominant_color(image)
+    phash = compute_phash(image)
     dominant_color_ms = elapsed_ms(stage_started)
 
     stage_started = time.perf_counter()
@@ -730,6 +760,7 @@ def analyze_photo(request: AnalyzeRequest) -> AnalyzeResponse:
         vector=vector,
         tags=tags,
         dominantColor=color,
+        phash=phash,
         timingsMs={
             "decodeMs": decode_ms,
             "embeddingMs": embedding_ms,
@@ -758,6 +789,7 @@ def analyze_photo_batch(request: AnalyzeBatchRequest) -> AnalyzeBatchResponse:
             save_derivative(make_thumbnail(image, max_edge), safe_thumbnail_path(item.thumbnail_path), quality=quality)
         results.append(AnalyzeBatchItemResponse(
             path=str(path), vector=vector, tags=classify(vector), dominantColor=dominant_color(image),
+            phash=compute_phash(image),
             timingsMs={"thumbnailMs": elapsed_ms(thumbnail_started), "batchTotalMs": elapsed_ms(total_started)},
         ))
     return AnalyzeBatchResponse(items=results)

@@ -89,10 +89,10 @@ func (s *PostgresStore) MediaFacets(ctx context.Context, mediaType string) (Medi
 		query  string
 		target *[]FacetCount
 	}{
-		{`SELECT capture_year::text,count(*) FROM media_assets WHERE media_type=$1 GROUP BY capture_year ORDER BY capture_year DESC`, &facets.Years},
-		{`SELECT COALESCE(NULLIF(pr.description,''),pr.name,''),count(*) FROM project_media_assets pm JOIN media_assets m ON m.id=pm.media_asset_id JOIN projects pr ON pr.id=pm.project_id WHERE m.media_type=$1 GROUP BY pr.id,pr.description,pr.name ORDER BY count(*) DESC,COALESCE(NULLIF(pr.description,''),pr.name,'')`, &facets.Projects},
-		{`SELECT t.name,count(*) FROM media_asset_tags mat JOIN media_assets m ON m.id=mat.media_asset_id JOIN tags t ON t.id=mat.tag_id WHERE m.media_type=$1 GROUP BY t.name ORDER BY count(*) DESC,t.name`, &facets.Tags},
-		{`SELECT codec,count(*) FROM media_assets WHERE media_type=$1 AND codec<>'' GROUP BY codec ORDER BY count(*) DESC,codec`, &facets.Codecs},
+		{`SELECT capture_year::text,count(*) FROM media_assets WHERE media_type=$1 AND duplicate_of IS NULL GROUP BY capture_year ORDER BY capture_year DESC`, &facets.Years},
+		{`SELECT COALESCE(NULLIF(pr.description,''),pr.name,''),count(*) FROM project_media_assets pm JOIN media_assets m ON m.id=pm.media_asset_id JOIN projects pr ON pr.id=pm.project_id WHERE m.media_type=$1 AND m.duplicate_of IS NULL GROUP BY pr.id,pr.description,pr.name ORDER BY count(*) DESC,COALESCE(NULLIF(pr.description,''),pr.name,'')`, &facets.Projects},
+		{`SELECT t.name,count(*) FROM media_asset_tags mat JOIN media_assets m ON m.id=mat.media_asset_id JOIN tags t ON t.id=mat.tag_id WHERE m.media_type=$1 AND m.duplicate_of IS NULL GROUP BY t.name ORDER BY count(*) DESC,t.name`, &facets.Tags},
+		{`SELECT codec,count(*) FROM media_assets WHERE media_type=$1 AND duplicate_of IS NULL AND codec<>'' GROUP BY codec ORDER BY count(*) DESC,codec`, &facets.Codecs},
 	}
 	for _, item := range queries {
 		rows, err := s.db.QueryContext(ctx, item.query, mediaType)
@@ -125,7 +125,7 @@ func (s *PostgresStore) SimilarMedia(ctx context.Context, mediaType, id, modalit
 		SELECT candidate.media_asset_id, 1-MIN(candidate.%s <=> anchor.embedding) AS similarity
 		FROM media_segments candidate CROSS JOIN anchor
 		JOIN media_assets ma ON ma.id=candidate.media_asset_id
-		WHERE candidate.media_asset_id<>$1 AND candidate.%s IS NOT NULL AND ma.media_type=$2
+		WHERE candidate.media_asset_id<>$1 AND candidate.%s IS NOT NULL AND ma.media_type=$2 AND ma.duplicate_of IS NULL
 		GROUP BY candidate.media_asset_id ORDER BY MIN(candidate.%s <=> anchor.embedding) LIMIT $3
 	) SELECT media_asset_id::text,similarity FROM ranked ORDER BY similarity DESC`, column, column, column, column, column)
 	rows, err := s.db.QueryContext(ctx, query, id, mediaType, limit)
@@ -168,7 +168,7 @@ func (s *PostgresStore) SimilarMedia(ctx context.Context, mediaType, id, modalit
 }
 
 func buildMediaWhere(filter MediaFilter) (string, []any) {
-	clauses := []string{"m.media_type=$1"}
+	clauses := []string{"m.media_type=$1", "m.duplicate_of IS NULL"}
 	args := []any{filter.MediaType}
 	add := func(format string, value any) {
 		args = append(args, value)

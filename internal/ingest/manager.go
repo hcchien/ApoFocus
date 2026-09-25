@@ -120,12 +120,37 @@ func (m *Manager) Import(ctx context.Context, request ImportRequest) (ImportResu
 	} else if found {
 		return ImportResult{PhotoID: existing.ID, Path: existing.Path, ThumbnailPath: existing.ThumbnailPath, Tags: existing.Tags, AlreadyExists: true}, nil
 	}
+	phashFinder, hasPHashFinder := m.repository.(PHashFinder)
+	if hasPHashFinder && inspection.PHash != nil {
+		if existing, found, err := phashFinder.FindByPHash(ctx, *inspection.PHash, DefaultPHashMaxDistance); err != nil {
+			return ImportResult{}, err
+		} else if found {
+			return ImportResult{PhotoID: existing.ID, Path: existing.Path, ThumbnailPath: existing.ThumbnailPath, Tags: existing.Tags, AlreadyExists: true}, nil
+		}
+	}
 
 	originalPath, thumbnailPath := m.destinationPaths(inspection)
 	thumbExisted := fileExists(thumbnailPath)
 	analysis, err := m.analyzer.Analyze(ctx, inspection.SourcePath, thumbnailPath)
 	if err != nil {
 		return ImportResult{}, err
+	}
+	if analysis.PHash != nil {
+		checkedBefore := inspection.PHash != nil
+		inspection.PHash = analysis.PHash
+		if hasPHashFinder && !checkedBefore {
+			if existing, found, err := phashFinder.FindByPHash(ctx, *inspection.PHash, DefaultPHashMaxDistance); err != nil {
+				if !thumbExisted {
+					_ = os.Remove(thumbnailPath)
+				}
+				return ImportResult{}, err
+			} else if found {
+				if !thumbExisted {
+					_ = os.Remove(thumbnailPath)
+				}
+				return ImportResult{PhotoID: existing.ID, Path: existing.Path, ThumbnailPath: existing.ThumbnailPath, Tags: existing.Tags, AlreadyExists: true}, nil
+			}
+		}
 	}
 	inspection.embedding = analysis.Embedding
 	inspection.DominantColor = analysis.DominantColor
@@ -211,6 +236,9 @@ func (m *Manager) inspectMetadata(request ImportRequest) (Inspection, error) {
 	}
 	inspection.SourcePath = source
 	inspection.ContentSHA256 = hash
+	if phash, ok := ComputePHash(source); ok {
+		inspection.PHash = &phash
+	}
 	if title := cleanLabel(request.Title, 240); title != "" {
 		inspection.Title = title
 	}

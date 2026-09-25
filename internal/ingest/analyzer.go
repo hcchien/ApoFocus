@@ -48,6 +48,7 @@ func (a *HTTPAnalyzer) Analyze(ctx context.Context, path, thumbnailPath string) 
 		Vector        []float32          `json:"vector"`
 		Tags          []string           `json:"tags"`
 		DominantColor string             `json:"dominantColor"`
+		PHash         *int64             `json:"phash"`
 		TimingsMS     map[string]float64 `json:"timingsMs"`
 	}
 	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
@@ -56,7 +57,7 @@ func (a *HTTPAnalyzer) Analyze(ctx context.Context, path, thumbnailPath string) 
 	if len(body.Vector) != 512 {
 		return Analysis{}, fmt.Errorf("embedding service returned %d dimensions; expected 512", len(body.Vector))
 	}
-	return Analysis{Tags: body.Tags, Embedding: body.Vector, DominantColor: body.DominantColor, TimingsMS: body.TimingsMS}, nil
+	return Analysis{Tags: body.Tags, Embedding: body.Vector, DominantColor: body.DominantColor, PHash: body.PHash, TimingsMS: body.TimingsMS}, nil
 }
 
 func (a *HTTPAnalyzer) AnalyzeBatch(ctx context.Context, inputs []AnalyzeInput) ([]BatchAnalysis, error) {
@@ -87,6 +88,7 @@ func (a *HTTPAnalyzer) AnalyzeBatch(ctx context.Context, inputs []AnalyzeInput) 
 			Vector        []float32          `json:"vector"`
 			Tags          []string           `json:"tags"`
 			DominantColor string             `json:"dominantColor"`
+			PHash         *int64             `json:"phash"`
 			TimingsMS     map[string]float64 `json:"timingsMs"`
 		} `json:"items"`
 	}
@@ -98,7 +100,7 @@ func (a *HTTPAnalyzer) AnalyzeBatch(ctx context.Context, inputs []AnalyzeInput) 
 		if len(item.Vector) != 512 {
 			return nil, fmt.Errorf("batch embedding returned %d dimensions", len(item.Vector))
 		}
-		out = append(out, BatchAnalysis{Path: item.Path, Analysis: Analysis{Embedding: item.Vector, Tags: item.Tags, DominantColor: item.DominantColor, TimingsMS: item.TimingsMS}})
+		out = append(out, BatchAnalysis{Path: item.Path, Analysis: Analysis{Embedding: item.Vector, Tags: item.Tags, DominantColor: item.DominantColor, PHash: item.PHash, TimingsMS: item.TimingsMS}})
 	}
 	return out, nil
 }

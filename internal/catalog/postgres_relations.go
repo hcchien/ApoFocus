@@ -169,7 +169,19 @@ func (s *PostgresStore) loadPhotoRelations(ctx context.Context, photo *Photo) er
 	if len(relations.Projects) > 0 {
 		photo.Project = relations.Projects[0].Description
 	}
-	return nil
+	dupRows, err := s.db.QueryContext(ctx, `SELECT path FROM photos WHERE duplicate_of=$1 AND path<>'' ORDER BY path`, photo.ID)
+	if err != nil {
+		return err
+	}
+	defer dupRows.Close()
+	for dupRows.Next() {
+		var dupPath string
+		if err := dupRows.Scan(&dupPath); err != nil {
+			return err
+		}
+		photo.DuplicatePaths = append(photo.DuplicatePaths, dupPath)
+	}
+	return dupRows.Err()
 }
 
 func (s *PostgresStore) photoDerivations(ctx context.Context, photoID string, parents bool) ([]PhotoDerivation, error) {

@@ -40,6 +40,29 @@ func (r *PostgresRepository) FindByHash(ctx context.Context, hash string) (Exist
 	return result, true, nil
 }
 
+func (r *PostgresRepository) FindByPHash(ctx context.Context, phash int64, maxDistance int) (ExistingPhoto, bool, error) {
+	var result ExistingPhoto
+	var tagsJSON string
+	err := r.db.QueryRowContext(ctx, `
+		SELECT p.id::text, p.path, COALESCE(p.thumbnail_path, ''),
+		       COALESCE((SELECT json_agg(t.name ORDER BY t.name) FROM photo_tags pt JOIN tags t ON t.id=pt.tag_id WHERE pt.photo_id=p.id), '[]')::text
+		FROM photos p
+		WHERE p.phash IS NOT NULL AND p.duplicate_of IS NULL
+		  AND bit_count(p.phash::bit(64) # ($1::bigint)::bit(64)) <= $2
+		ORDER BY bit_count(p.phash::bit(64) # ($1::bigint)::bit(64)), p.created_at, p.id
+		LIMIT 1`, phash, maxDistance).Scan(&result.ID, &result.Path, &result.ThumbnailPath, &tagsJSON)
+	if err == sql.ErrNoRows {
+		return ExistingPhoto{}, false, nil
+	}
+	if err != nil {
+		return ExistingPhoto{}, false, fmt.Errorf("find photo by phash: %w", err)
+	}
+	if err := json.Unmarshal([]byte(tagsJSON), &result.Tags); err != nil {
+		return ExistingPhoto{}, false, err
+	}
+	return result, true, nil
+}
+
 func (r *PostgresRepository) Insert(ctx context.Context, record PhotoRecord) (string, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -68,18 +91,18 @@ func (r *PostgresRepository) Insert(ctx context.Context, record PhotoRecord) (st
 		INSERT INTO photos(
 			project_id, title, capture_year, taken_at, camera, lens, aperture, shutter_speed,
 			iso, focal_length, dimensions, file_type, file_size, location_name, latitude, longitude,
-			path, thumbnail_path, content_sha256, image_url, thumbnail_url, aspect_ratio,
+			path, thumbnail_path, content_sha256, phash, image_url, thumbnail_url, aspect_ratio,
 			dominant_color, metadata, embedding, storage_root_id, relative_path, file_id,
 			availability_status, last_verified_at, thumbnail_relative_path, thumbnail_file_id, thumbnail_status
 		) VALUES(
 			$1, $2, $3, $4, NULLIF($5,''), NULLIF($6,''), NULLIF($7,''), NULLIF($8,''),
 			NULLIF($9,0), NULLIF($10,''), NULLIF($11,''), NULLIF($12,''), $13, NULLIF($14,''), $15, $16,
-			$17, $18, $19, $20, $21, $22, NULLIF($23,''), $24::jsonb, $25::vector,
-			NULLIF($26,'')::uuid, NULLIF($27,''), NULLIF($28,''), 'available', now(), NULLIF($29,''), NULLIF($30,''), 'available'
+			$17, $18, $19, $20, $21, $22, $23, NULLIF($24,''), $25::jsonb, $26::vector,
+			NULLIF($27,'')::uuid, NULLIF($28,''), NULLIF($29,''), 'available', now(), NULLIF($30,''), NULLIF($31,''), 'available'
 		) RETURNING id::text`,
 		projectID, record.Title, record.Year, record.TakenAt, record.Camera, record.Lens, record.Aperture, record.ShutterSpeed,
 		record.ISO, record.FocalLength, record.Dimensions, record.FileType, humanBytes(record.FileSizeBytes), locationName,
-		latitude, longitude, record.Path, record.ThumbnailPath, record.ContentSHA256, record.ImageURL, record.ThumbnailURL,
+		latitude, longitude, record.Path, record.ThumbnailPath, record.ContentSHA256, record.PHash, record.ImageURL, record.ThumbnailURL,
 		record.AspectRatio, record.DominantColor, metadata, vectorLiteral(record.embedding), r.storageRootID,
 		record.RelativePath, record.FileID, record.ThumbnailRelativePath, record.ThumbnailFileID).Scan(&photoID)
 	if err != nil {

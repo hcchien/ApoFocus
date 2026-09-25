@@ -485,6 +485,7 @@ fi
 if ! relation_exists deep_analysis_jobs; then
   PGPASSWORD="$DB_PASSWORD" "${PSQL[@]}" -d apofocus -f "$PROJECT_ROOT/migrations/000008_deep_analysis.sql"
 fi
+PGPASSWORD="$DB_PASSWORD" "${PSQL[@]}" -d apofocus -f "$PROJECT_ROOT/migrations/000009_photo_phash.sql"
 
 vector_version="$(PGPASSWORD="$DB_PASSWORD" "${PSQL[@]}" -d apofocus -Atqc "SELECT extversion FROM pg_extension WHERE extname='vector'")"
 [[ -n "$vector_version" ]] || fail "pgvector extension was not created"

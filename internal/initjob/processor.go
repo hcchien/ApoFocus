@@ -190,6 +190,7 @@ func (p *CatalogProcessor) insertMedia(ctx context.Context, run Run, item Item, 
 type preparedPhoto struct {
 	item            Item
 	hash, thumbnail string
+	phash           *int64
 }
 
 func (p *CatalogProcessor) AnalyzePhoto(ctx context.Context, run Run, item Item) error {
@@ -220,14 +221,34 @@ func (p *CatalogProcessor) AnalyzePhotoBatch(ctx context.Context, run Run, items
 			p.failPhoto(item.AssetID)
 			continue
 		}
+		var phash *int64
+		if computed, ok := ingest.ComputePHash(item.SourcePath); ok {
+			phash = &computed
+		}
 		duplicate, e := p.photoDuplicate(ctx, item.AssetID, hash)
 		if e != nil {
 			results[item.ID] = e
 			p.failPhoto(item.AssetID)
 			continue
 		}
+		if duplicate == "" && phash != nil {
+			duplicate, e = p.photoPHashDuplicate(ctx, item.AssetID, *phash, ingest.DefaultPHashMaxDistance)
+			if e != nil {
+				results[item.ID] = e
+				p.failPhoto(item.AssetID)
+				continue
+			}
+		}
+		if duplicate == "" {
+			for _, prev := range prepared {
+				if prev.hash == hash || (phash != nil && prev.phash != nil && ingest.PHashDistance(*phash, *prev.phash) <= ingest.DefaultPHashMaxDistance) {
+					duplicate = prev.item.AssetID
+					break
+				}
+			}
+		}
 		if duplicate != "" {
-			_, e = p.db.ExecContext(ctx, `UPDATE photos SET duplicate_of=$2,content_hash_status='completed',ai_status='completed',updated_at=now() WHERE id=$1`, item.AssetID, duplicate)
+			_, e = p.db.ExecContext(ctx, `UPDATE photos SET phash=COALESCE($3,phash),duplicate_of=$2,content_hash_status='completed',ai_status='completed',updated_at=now() WHERE id=$1`, item.AssetID, duplicate, phash)
 			results[item.ID] = e
 			continue
 		}
@@ -237,7 +258,7 @@ func (p *CatalogProcessor) AnalyzePhotoBatch(ctx context.Context, run Run, items
 			p.failPhoto(item.AssetID)
 			continue
 		}
-		prepared = append(prepared, preparedPhoto{item: item, hash: hash, thumbnail: thumbnail})
+		prepared = append(prepared, preparedPhoto{item: item, hash: hash, thumbnail: thumbnail, phash: phash})
 		inputs = append(inputs, ingest.AnalyzeInput{Path: item.SourcePath, ThumbnailPath: thumbnail})
 	}
 	if len(prepared) == 0 {
@@ -305,6 +326,16 @@ func (p *CatalogProcessor) finishPhoto(ctx context.Context, entry preparedPhoto,
 	if e != nil {
 		return e
 	}
+	phash := entry.phash
+	if analysis.PHash != nil {
+		phash = analysis.PHash
+	}
+	var duplicate any
+	if phash != nil {
+		if dup, dupErr := p.photoPHashDuplicate(ctx, entry.item.AssetID, *phash, ingest.DefaultPHashMaxDistance); dupErr == nil && dup != "" {
+			duplicate = dup
+		}
+	}
 	relative, _ := filepath.Rel(p.libraryRoot, entry.thumbnail)
 	url := "/media/" + filepath.ToSlash(relative)
 	tx, e := p.db.BeginTx(ctx, nil)
@@ -312,7 +343,7 @@ func (p *CatalogProcessor) finishPhoto(ctx context.Context, entry preparedPhoto,
 		return e
 	}
 	defer func() { _ = tx.Rollback() }()
-	_, e = tx.ExecContext(ctx, `UPDATE photos SET content_sha256=$2,content_hash_status='completed',embedding=$3::vector,dominant_color=$4,thumbnail_path=$5,thumbnail_relative_path=$6,thumbnail_file_id=$7,thumbnail_storage_root_id=$8,thumbnail_url=$9,thumbnail_status='available',ai_status='completed',updated_at=now() WHERE id=$1`, entry.item.AssetID, entry.hash, vectorLiteral(analysis.Embedding), analysis.DominantColor, entry.thumbnail, filepath.ToSlash(relative), identity.FileID, managed.ID, url)
+	_, e = tx.ExecContext(ctx, `UPDATE photos SET content_sha256=$2,phash=$3,duplicate_of=COALESCE($4::uuid,duplicate_of),content_hash_status='completed',embedding=$5::vector,dominant_color=$6,thumbnail_path=$7,thumbnail_relative_path=$8,thumbnail_file_id=$9,thumbnail_storage_root_id=$10,thumbnail_url=$11,thumbnail_status='available',ai_status='completed',updated_at=now() WHERE id=$1`, entry.item.AssetID, entry.hash, phash, duplicate, vectorLiteral(analysis.Embedding), analysis.DominantColor, entry.thumbnail, filepath.ToSlash(relative), identity.FileID, managed.ID, url)
 	if e != nil {
 		return e
 	}
@@ -460,7 +491,15 @@ func insertAITags(ctx context.Context, tx *sql.Tx, kind, id string, tags []strin
 }
 func (p *CatalogProcessor) photoDuplicate(ctx context.Context, id, hash string) (string, error) {
 	var other string
-	e := p.db.QueryRowContext(ctx, `SELECT id::text FROM photos WHERE content_sha256=$1 AND id<>$2 LIMIT 1`, hash, id).Scan(&other)
+	e := p.db.QueryRowContext(ctx, `SELECT id::text FROM photos WHERE content_sha256=$1 AND id<>$2 AND duplicate_of IS NULL LIMIT 1`, hash, id).Scan(&other)
+	if errors.Is(e, sql.ErrNoRows) {
+		return "", nil
+	}
+	return other, e
+}
+func (p *CatalogProcessor) photoPHashDuplicate(ctx context.Context, id string, phash int64, maxDistance int) (string, error) {
+	var other string
+	e := p.db.QueryRowContext(ctx, `SELECT id::text FROM photos WHERE phash IS NOT NULL AND id<>$2 AND duplicate_of IS NULL AND bit_count(phash::bit(64) # ($1::bigint)::bit(64)) <= $3 ORDER BY bit_count(phash::bit(64) # ($1::bigint)::bit(64)), created_at, id LIMIT 1`, phash, id, maxDistance).Scan(&other)
 	if errors.Is(e, sql.ErrNoRows) {
 		return "", nil
 	}

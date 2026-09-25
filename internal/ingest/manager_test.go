@@ -169,3 +169,43 @@ func createJPEG(t *testing.T, directory, name string) string {
 	}
 	return path
 }
+
+func TestComputePHashMatchesAcrossResolutionsAndQuality(t *testing.T) {
+	dir := t.TempDir()
+	writePattern := func(name string, w, h, quality int) string {
+		path := filepath.Join(dir, name)
+		file, err := os.Create(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		img := image.NewRGBA(image.Rect(0, 0, w, h))
+		for y := 0; y < h; y++ {
+			for x := 0; x < w; x++ {
+				u := float64(x) / float64(w)
+				v := float64(y) / float64(h)
+				dx, dy := u-0.35, v-0.42
+				ring := uint8(120 + 100*((int(u*6)+int(v*5))%2))
+				if dx*dx+dy*dy < 0.08 {
+					ring = 240
+				}
+				img.Set(x, y, color.RGBA{R: ring, G: uint8(u * v * 255), B: uint8((1 - u) * v * 200), A: 255})
+			}
+		}
+		if err := jpeg.Encode(file, img, &jpeg.Options{Quality: quality}); err != nil {
+			file.Close()
+			t.Fatal(err)
+		}
+		file.Close()
+		return path
+	}
+	p1 := writePattern("high.jpg", 256, 192, 95)
+	p2 := writePattern("low.jpg", 64, 48, 60)
+	h1, ok1 := ComputePHash(p1)
+	h2, ok2 := ComputePHash(p2)
+	if !ok1 || !ok2 {
+		t.Fatalf("expected pHash computation to succeed: ok1=%v ok2=%v", ok1, ok2)
+	}
+	if dist := PHashDistance(h1, h2); dist > DefaultPHashMaxDistance {
+		t.Fatalf("expected Hamming distance <= %d, got %d", DefaultPHashMaxDistance, dist)
+	}
+}

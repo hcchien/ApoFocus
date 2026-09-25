@@ -24,6 +24,7 @@ type Inspection struct {
 	SourcePath      string             `json:"sourcePath"`
 	Filename        string             `json:"filename"`
 	ContentSHA256   string             `json:"contentSha256"`
+	PHash           *int64             `json:"phash,omitempty"`
 	Title           string             `json:"title"`
 	Project         string             `json:"project"`
 	TakenAt         time.Time          `json:"takenAt"`
@@ -61,6 +62,7 @@ type Analysis struct {
 	Tags          []string
 	Embedding     []float32
 	DominantColor string
+	PHash         *int64
 	TimingsMS     map[string]float64
 }
 
@@ -103,4 +105,8 @@ type PhotoRecord struct {
 type Repository interface {
 	FindByHash(context.Context, string) (ExistingPhoto, bool, error)
 	Insert(context.Context, PhotoRecord) (string, error)
+}
+
+type PHashFinder interface {
+	FindByPHash(ctx context.Context, phash int64, maxDistance int) (ExistingPhoto, bool, error)
 }

@@ -598,7 +598,9 @@ async function openDetail(id) {
   $("#detail-title").textContent = photo.title;
   $("#detail-date").textContent = formatDate(photo.takenAt);
   $("#detail-exif").innerHTML = dlItems([[t("field.camera"), photo.camera], [t("field.lens"), photo.lens], [t("field.aperture"), photo.aperture], [t("field.shutter"), photo.shutterSpeed], ["ISO", photo.iso], [t("field.focalLength"), photo.focalLength]]);
-  $("#detail-file").innerHTML = dlItems([[t("field.format"), photo.fileType], [t("field.dimensions"), photo.dimensions], [t("field.fileSize"), photo.fileSize], [t("field.year"), photo.year], [t("field.originalStatus"), availabilityLabel(photo.availabilityStatus, true)], [t("field.thumbnailStatus"), availabilityLabel(photo.thumbnailStatus, true)], [t("field.path"), photo.path, true]]);
+  const fileItems = [[t("field.format"), photo.fileType], [t("field.dimensions"), photo.dimensions], [t("field.fileSize"), photo.fileSize], [t("field.year"), photo.year], [t("field.originalStatus"), availabilityLabel(photo.availabilityStatus, true)], [t("field.thumbnailStatus"), availabilityLabel(photo.thumbnailStatus, true)], [t("field.path"), photo.path, true]];
+  if (photo.duplicatePaths?.length) fileItems.push([t("field.duplicatePaths"), photo.duplicatePaths.join("\n"), true]);
+  $("#detail-file").innerHTML = dlItems(fileItems);
   $("#detail-tags").innerHTML = photo.tags.map((tag) => `<span># ${escapeHTML(tag)}</span>`).join("");
   $("#detail-relations").innerHTML = renderPhotoRelations(photo.relations || {});
   loadPhotoDeepAnalysis(photo.id);
