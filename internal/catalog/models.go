@@ -28,7 +28,7 @@ type Photo struct {
 	FileType       string         `json:"fileType"`
 	FileSize       string         `json:"fileSize"`
 	Location       *Location      `json:"location,omitempty"`
-	Path           string         `json:"-"`
+	Path           string         `json:"path,omitempty"`
 	ThumbnailPath  string         `json:"-"`
 	ImageURL       string         `json:"imageUrl"`
 	ThumbnailURL   string         `json:"thumbnailUrl"`

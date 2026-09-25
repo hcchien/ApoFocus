@@ -25,7 +25,7 @@ type MediaAsset struct {
 	ThumbnailState string         `json:"thumbnailStatus"`
 	Transcript     string         `json:"transcript,omitempty"`
 	Metadata       map[string]any `json:"metadata,omitempty"`
-	Path           string         `json:"-"`
+	Path           string         `json:"path,omitempty"`
 	ThumbnailPath  string         `json:"-"`
 	Segments       []MediaSegment `json:"segments,omitempty"`
 	Description    string         `json:"description"`

@@ -598,7 +598,7 @@ async function openDetail(id) {
   $("#detail-title").textContent = photo.title;
   $("#detail-date").textContent = formatDate(photo.takenAt);
   $("#detail-exif").innerHTML = dlItems([[t("field.camera"), photo.camera], [t("field.lens"), photo.lens], [t("field.aperture"), photo.aperture], [t("field.shutter"), photo.shutterSpeed], ["ISO", photo.iso], [t("field.focalLength"), photo.focalLength]]);
-  $("#detail-file").innerHTML = dlItems([[t("field.format"), photo.fileType], [t("field.dimensions"), photo.dimensions], [t("field.fileSize"), photo.fileSize], [t("field.year"), photo.year], [t("field.originalStatus"), availabilityLabel(photo.availabilityStatus, true)], [t("field.thumbnailStatus"), availabilityLabel(photo.thumbnailStatus, true)]]);
+  $("#detail-file").innerHTML = dlItems([[t("field.format"), photo.fileType], [t("field.dimensions"), photo.dimensions], [t("field.fileSize"), photo.fileSize], [t("field.year"), photo.year], [t("field.originalStatus"), availabilityLabel(photo.availabilityStatus, true)], [t("field.thumbnailStatus"), availabilityLabel(photo.thumbnailStatus, true)], [t("field.path"), photo.path, true]]);
   $("#detail-tags").innerHTML = photo.tags.map((tag) => `<span># ${escapeHTML(tag)}</span>`).join("");
   $("#detail-relations").innerHTML = renderPhotoRelations(photo.relations || {});
   loadPhotoDeepAnalysis(photo.id);
@@ -847,6 +847,7 @@ function renderMediaDetail(asset, mediaType, { loadPlayer = false } = {}) {
     [t("field.originalStatus"), availabilityLabel(asset.availabilityStatus, true)],
   ];
   if (mediaType === "videos") mediaInfo.push([t("field.previewStatus"), availabilityLabel(asset.thumbnailStatus, true)]);
+  mediaInfo.push([t("field.path"), asset.path, true]);
   $("#media-detail-info").innerHTML = dlItems(mediaInfo);
   $("#media-detail-tags").innerHTML = (asset.tags || []).map((tag) => `<span># ${escapeHTML(tag)}</span>`).join("");
   $("#media-detail-relations").innerHTML = renderMediaRelations(asset.relations || {});
@@ -1081,7 +1082,7 @@ function updateBatchCopy() {
 }
 
 function dlItems(items) {
-  return items.map(([term, value]) => `<div><dt>${escapeHTML(term)}</dt><dd>${escapeHTML(String(value || "—"))}</dd></div>`).join("");
+  return items.map(([term, value, wide]) => `<div${wide ? ' class="wide"' : ""}><dt>${escapeHTML(term)}</dt><dd>${escapeHTML(String(value || "—"))}</dd></div>`).join("");
 }
 
 function formatDate(value) {
