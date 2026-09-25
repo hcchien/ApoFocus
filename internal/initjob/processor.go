@@ -244,19 +244,22 @@ func (p *CatalogProcessor) AnalyzePhotoBatch(ctx context.Context, run Run, items
 		return results
 	}
 	analyses := map[string]ingest.Analysis{}
+	useSingle := true
 	if batcher, ok := p.photoAnalyzer.(ingest.BatchAnalyzer); ok {
 		batchResults, e := batcher.AnalyzeBatch(ctx, inputs)
-		if e != nil {
-			for _, entry := range prepared {
-				results[entry.item.ID] = e
-				p.failPhoto(entry.item.AssetID)
+		if e == nil {
+			useSingle = false
+			for _, entry := range batchResults {
+				analyses[entry.Path] = entry.Analysis
 			}
+		} else if len(prepared) == 1 {
+			useSingle = false
+			results[prepared[0].item.ID] = e
+			p.failPhoto(prepared[0].item.AssetID)
 			return results
 		}
-		for _, entry := range batchResults {
-			analyses[entry.Path] = entry.Analysis
-		}
-	} else {
+	}
+	if useSingle {
 		for _, entry := range prepared {
 			analysis, e := p.photoAnalyzer.Analyze(ctx, entry.item.SourcePath, entry.thumbnail)
 			if e != nil {

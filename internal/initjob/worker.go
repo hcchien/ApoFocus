@@ -171,7 +171,7 @@ func (w *Worker) scan(ctx context.Context, run Run) error {
 		if path != run.SourceRoot && entry.IsDir() && strings.HasPrefix(entry.Name(), ".") {
 			return filepath.SkipDir
 		}
-		if entry.IsDir() {
+		if entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 			return nil
 		}
 		mediaType := detectMedia(path)

@@ -168,7 +168,7 @@ func (w *Worker) scanAndPersist(ctx context.Context, job Job) error {
 		if path != job.SourceRoot && entry.IsDir() && strings.HasPrefix(entry.Name(), ".") {
 			return filepath.SkipDir
 		}
-		if !entry.IsDir() {
+		if !entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
 			mediaType := detectedType(path)
 			if mediaType != "" && allowed[mediaType] {
 				pending = append(pending, DiscoveredFile{Path: path, MediaType: mediaType})
